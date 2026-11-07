@@ -11,6 +11,7 @@ In another terminal:
 
 ```sh
 betterwright run --no-daemon tests/power-engine.browser.js
+betterwright run --no-daemon tests/paste-ordnance.browser.js
 ```
 
 The test advances animation frames deterministically. It checks that typing and
@@ -22,3 +23,13 @@ anchored, and disposal restores host styles. The fixture
 includes a fixed terminal and sidebar and a translated timeline row.
 Terminal input (including Space, deletion, paste, and Enter) must retain its
 positioning and focus without emitting effects or changing scroll position.
+
+`paste-ordnance.browser.js` covers paste ordnance (#8): the `pickOrdnance` tier
+table and lucky-drop limits, milestones crossed by combo jumps, paste-length capture
+in `<textarea>`, `<input>` and contenteditable (paste event, `InputEvent.dataTransfer`,
+drops), the fallback for editors that cancel the native paste, empty and terminal
+pastes, staggered detonations, every theme × tier slam title with clean canvases
+afterwards, skins kept across a mid-flight theme switch, the timer, pending and
+particle caps under ten rapid 300k pastes, the singularity pull, `lightning`,
+`screenShake` and `sound` off, and disabling and re-enabling during an event. It
+uses the `setOrdnanceRandom` and `ordnanceDebug` test seams.
