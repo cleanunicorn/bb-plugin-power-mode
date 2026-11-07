@@ -18,3 +18,9 @@ Power Mode is a frontend-only plugin. It has no CLI commands or agent tools.
   across tabs in the same browser. An agent cannot toggle it.
 - It reacts to `input` events in text fields, textareas, and contenteditable editors;
   password fields are ignored.
+- **Paste ordnance:** pasting text drops theme-skinned weapons near the caret, scaled
+  by the paste length over 9 tiers: firecracker (< 50 chars), dynamite, cluster bomb,
+  rockets, carpet bombing (2k+), orbital strike, meteor shower, tactical nuke (60k+),
+  singularity (≥ 200k). Tiers 7–9 run one at a time. Pastes with no text (images,
+  files) get the plain paste burst. There is no separate setting: it follows
+  enabled/intensity/lightning/screen shake/sound. Terminal pastes are ignored.

@@ -23,7 +23,7 @@ import {
   type PowerSettings,
 } from "./power-store";
 import { flushPowerStats, recordStats, setUnlockHandler, type Achievement } from "./power-stats";
-import { THEMES, type Theme } from "./power-themes";
+import { ORDNANCE_SKINS, THEMES, type OrdnanceSkin, type OrdnanceSound, type Theme } from "./power-themes";
 
 // ---------------------------------------------------------------- tuning
 
@@ -68,13 +68,97 @@ const MILESTONES: Milestone[] = [
   { at: 500, title: "ASCENDED", hue: 160 },
 ];
 
-function milestoneFor(combo: number): Milestone | null {
-  const exact = MILESTONES.find((m) => m.at === combo);
-  if (exact) return exact;
-  if (combo > 500 && combo % 250 === 0) {
-    return { at: combo, title: `∞ POWER ∞ ×${combo}`, hue: (combo / 250) * 67 % 360 };
+/**
+ * The highest milestone crossed when the combo moves from `prev` to `next`.
+ * A paste can add up to +100 at once, so an exact match would skip milestones.
+ * Includes the endless `∞ POWER ∞` milestones every 250 past 500.
+ */
+export function milestoneCrossed(prev: number, next: number): Milestone | null {
+  if (!(next > prev)) return null;
+  const top = Math.floor(next / 250) * 250;
+  if (top > 500 && top > prev) return { at: top, title: `∞ POWER ∞ ×${top}`, hue: (top / 250) * 67 % 360 };
+  let found: Milestone | null = null;
+  for (const m of MILESTONES) if (m.at > prev && m.at <= next) found = m;
+  return found;
+}
+
+// ---------------------------------------------------------------- paste ordnance
+//
+// Pasting drops ordnance near the caret. The weapon tier grows ~×3 in paste
+// length per level; a "lucky drop" upgrades a paste one tier (never into 8/9).
+
+/** Lower bound (chars) of tiers 2…9. */
+export const ORDNANCE_THRESHOLDS = [50, 200, 600, 2000, 6000, 20000, 60000, 200000] as const;
+/** Combo bump per tier, 1 → 9. */
+export const ORDNANCE_COMBO = [5, 10, 15, 20, 30, 40, 50, 75, 100] as const;
+/** [min, max] item count per tier (pops, sticks, bomblets, rockets, bombs, hits, meteors, nukes, holes). */
+const ORDNANCE_COUNT: readonly (readonly [number, number])[] = [
+  [4, 6], [1, 3], [6, 6], [3, 6], [8, 12], [3, 3], [8, 10], [1, 1], [1, 1],
+];
+/** Most detonation timers a tier arms; checked against the pending cap before dropping. */
+const ORDNANCE_ARMS = [6, 3, 7, 6, 12, 4, 11, 5, 1] as const;
+/** Tiers from here on are "events": one runs at a time. */
+const EVENT_TIER = 7;
+const LUCKY_ODDS = 1 / 12;
+/** Across all pastes, at most this many detonations may be pending. */
+const MAX_PENDING_ORDNANCE = 24;
+/** Impact points keep at least this distance from the caret. */
+const CARET_CLEARANCE = 60;
+/** Pool slots only weapon bodies (carriers) may use; see `room()`. */
+const CARRIER_RESERVE = 40;
+
+export interface OrdnancePick {
+  tier: number;
+  count: number;
+  combo: number;
+  lucky: boolean;
+}
+
+/** Weapon for a paste of `chars` characters. Pure; `rnd` drives the lucky drop. */
+export function pickOrdnance(chars: number, rnd: () => number = Math.random): OrdnancePick {
+  const n = Number.isFinite(chars) && chars > 0 ? chars : 0;
+  let tier = 1;
+  for (const at of ORDNANCE_THRESHOLDS) if (n >= at) tier++;
+  // Position within the tier (log scale) picks the count, so it is deterministic.
+  const lo = tier === 1 ? 1 : ORDNANCE_THRESHOLDS[tier - 2];
+  const hi = tier === 9 ? lo * 3 : ORDNANCE_THRESHOLDS[tier - 1];
+  const frac = Math.min(1, Math.max(0, Math.log(Math.max(n, 1) / lo) / Math.log(hi / lo)));
+  let lucky = false;
+  // Never upgrade into the nuke or singularity (tiers 8–9).
+  if (tier < 7 && rnd() < LUCKY_ODDS) {
+    tier++;
+    lucky = true;
   }
-  return null;
+  const [min, max] = ORDNANCE_COUNT[tier - 1];
+  const count = lucky ? min : min + Math.round(frac * (max - min));
+  return { tier, count, combo: ORDNANCE_COMBO[tier - 1], lucky };
+}
+
+let ordnanceRandom: () => number = Math.random;
+/** Test seam: makes the lucky-drop roll deterministic (null restores Math.random). */
+export function setOrdnanceRandom(fn: (() => number) | null) {
+  ordnanceRandom = fn ?? Math.random;
+}
+
+export interface OrdnanceDebug {
+  particles: number;
+  maxParticles: number;
+  ordnance: number;
+  pending: number;
+  event: boolean;
+  /** Detonation timers armed by the latest paste. */
+  lastArmed: number;
+  lastTier: number;
+  dimmed: boolean;
+  /** Mean distance of pullable particles to the active singularity. */
+  pullDistance: number | null;
+  /** Live particles per kind. */
+  kinds: Record<string, number>;
+}
+let debugHook: (() => OrdnanceDebug) | null = null;
+/** Test seam: live ordnance counters of the mounted engine. */
+export function ordnanceDebug(): OrdnanceDebug | null {
+  return debugHook?.() ?? null;
 }
 
 function tierName(combo: number): string {
@@ -88,7 +172,30 @@ function tierName(combo: number): string {
 
 // ---------------------------------------------------------------- types
 
-type ParticleKind = "spark" | "ember" | "shard" | "glyph" | "ring" | "bolt" | "pixel" | "petal" | "code";
+type ParticleKind = "spark" | "ember" | "shard" | "glyph" | "ring" | "bolt" | "pixel" | "petal" | "code" | "ordnance";
+
+type OrdVariant =
+  | "cracker" | "stick" | "canister" | "bomblet" | "rocket" | "bomber"
+  | "bomb" | "reticle" | "beam" | "meteor" | "nuke" | "hole";
+
+/** A weapon body (carrier) tweened along an arc, drawn in its skin's style. */
+interface Ord {
+  variant: OrdVariant;
+  skin: OrdnanceSkin;
+  sx: number;
+  sy: number;
+  tx: number;
+  ty: number;
+  /** Arc height in px (positive bulges upward). */
+  lift: number;
+  /** ms before it appears. */
+  delay: number;
+  /** ms of motion after `delay`; it then rests at the target. */
+  fly: number;
+  ease: "in" | "out" | "linear";
+  /** Beam sweep distance (px) across its life. */
+  sweep?: number;
+}
 
 interface Particle {
   kind: ParticleKind;
@@ -104,6 +211,7 @@ interface Particle {
   angle: number;
   text?: string;
   points?: number[];
+  ord?: Ord;
 }
 
 interface ShakeState {
@@ -254,6 +362,13 @@ const CSS = `
 .pm-slam.pm-light small{color:var(--pm-deep);text-shadow:0 0 8px #fff}
 .pm-slam.pm-light.pm-quiet{color:#333;-webkit-text-stroke:0;text-shadow:0 0 10px #fff}
 .pm-vignette.pm-light{background:radial-gradient(ellipse at center,transparent 60%,var(--pm-glow) 160%)}
+.pm-flash.pm-big{background:radial-gradient(circle at var(--pm-fx,50%) var(--pm-fy,50%),#fff 0%,var(--pm-flash) 40%,transparent 90%);
+  animation-duration:.9s}
+.pm-flash.pm-big.pm-light{background:radial-gradient(circle at var(--pm-fx,50%) var(--pm-fy,50%),var(--pm-flash) 0%,transparent 80%)}
+.pm-dim{position:fixed;inset:0;z-index:2147482998;pointer-events:none;will-change:opacity;
+  background:radial-gradient(ellipse at center,transparent 45%,rgba(0,0,0,.5) 125%);animation:pm-dim-in .5s ease forwards}
+.pm-dim.pm-light{background:radial-gradient(ellipse at center,transparent 50%,rgba(0,0,0,.18) 125%)}
+@keyframes pm-dim-in{0%{opacity:0}100%{opacity:1}}
 .pm-vignette{position:fixed;inset:0;z-index:2147482999;pointer-events:none;opacity:0;will-change:opacity;
   transition:opacity .4s ease;background:radial-gradient(ellipse at center,transparent 55%,var(--pm-glow) 140%)}
 `;
@@ -337,10 +452,155 @@ class Synth {
     this.tone(660, 0.5, "triangle", 0.25, 0, 60);
   }
 
+  // ---- ordnance sounds. `flavor` re-voices them per theme; `at` is a Web
+  // Audio start offset (s), so staggered sounds need no extra timers.
+
+  private noiseBuffer: AudioBuffer | null = null;
+  private voices = new Map<string, number[]>();
+
+  /** At most 3 overlapping instances of the same sound. */
+  private claim(name: string, at: number, dur: number): boolean {
+    const ctx = this.ensure();
+    if (!ctx || !this.master) return false;
+    const now = ctx.currentTime;
+    const live = (this.voices.get(name) ?? []).filter((end) => end > now + at);
+    if (live.length >= 3) return false;
+    live.push(now + at + dur);
+    this.voices.set(name, live);
+    return true;
+  }
+
+  private wave(flavor: OrdnanceSound, base: OscillatorType): OscillatorType {
+    switch (flavor) {
+      case "bit":
+      case "chip": return "square";
+      case "soft": return base === "sine" ? "sine" : "triangle";
+      case "glitch": return base === "sine" ? "sine" : "sawtooth";
+      default: return base;
+    }
+  }
+
+  private ftone(flavor: OrdnanceSound, freq: number, dur: number, type: OscillatorType, vol: number, at = 0, slideTo?: number) {
+    const k = flavor === "heavy" ? 0.75 : 1;
+    const v = flavor === "soft" ? vol * 0.6 : vol;
+    this.tone(freq * k, dur, this.wave(flavor, type), v, at, slideTo ? slideTo * k : undefined);
+    // Glitch: a detuned, slightly late twin.
+    if (flavor === "glitch") this.tone(freq * 1.03, dur * 0.8, "sawtooth", v * 0.5, at + 0.02, slideTo ? slideTo * 0.97 : undefined);
+  }
+
+  private noise(flavor: OrdnanceSound, dur: number, vol: number, at = 0, filter?: { type: BiquadFilterType; freq: number; to?: number }, swell = false) {
+    const ctx = this.ensure();
+    if (!ctx || !this.master) return;
+    if (!this.noiseBuffer) {
+      const len = Math.floor(ctx.sampleRate * 2);
+      this.noiseBuffer = ctx.createBuffer(1, len, ctx.sampleRate);
+      const data = this.noiseBuffer.getChannelData(0);
+      for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
+    }
+    const t = ctx.currentTime + at;
+    const src = ctx.createBufferSource();
+    src.buffer = this.noiseBuffer;
+    src.loop = dur > 2;
+    const gain = ctx.createGain();
+    const level = vol * (flavor === "heavy" ? 1.3 : flavor === "soft" ? 0.5 : flavor === "chip" ? 0.6 : 1);
+    if (swell) {
+      gain.gain.setValueAtTime(0.0001, t);
+      gain.gain.exponentialRampToValueAtTime(level, t + dur);
+    } else {
+      gain.gain.setValueAtTime(level, t);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    }
+    let node: AudioNode = src;
+    if (filter) {
+      const f = ctx.createBiquadFilter();
+      f.type = filter.type;
+      f.frequency.setValueAtTime(filter.freq, t);
+      if (filter.to) f.frequency.exponentialRampToValueAtTime(filter.to, t + dur);
+      node = node.connect(f);
+    }
+    node.connect(gain).connect(this.master);
+    src.start(t);
+    src.stop(t + dur + 0.05);
+  }
+
+  /** Noise ticks: firecracker pops. */
+  crackle(flavor: OrdnanceSound, at = 0) {
+    if (!this.claim("crackle", at, 0.1)) return;
+    for (let i = 0; i < 3; i++) this.noise(flavor, 0.03, 0.5, at + i * 0.025, { type: "highpass", freq: 1800 });
+    if (flavor === "chip" || flavor === "bit") this.ftone(flavor, 900, 0.05, "square", 0.15, at);
+  }
+
+  /** Band-passed hiss of a burning fuse. */
+  fuse(flavor: OrdnanceSound, dur: number, at = 0) {
+    if (!this.claim("fuse", at, dur)) return;
+    this.noise(flavor, dur, 0.18, at, { type: "bandpass", freq: 3200, to: 4200 });
+  }
+
+  /** Metallic clack: a canister splitting open. */
+  pin(flavor: OrdnanceSound, at = 0) {
+    if (!this.claim("pin", at, 0.1)) return;
+    this.ftone(flavor, 1800, 0.06, "square", 0.2, at);
+    this.ftone(flavor, 2650, 0.08, "triangle", 0.15, at + 0.01);
+  }
+
+  /** Noise sweep: a rocket launch. */
+  whoosh(flavor: OrdnanceSound, at = 0) {
+    if (!this.claim("whoosh", at, 0.45)) return;
+    this.noise(flavor, 0.45, 0.35, at, { type: "bandpass", freq: 400, to: 2400 });
+  }
+
+  /** Falling whistle: a dropped bomb. */
+  whistle(flavor: OrdnanceSound, dur: number, at = 0) {
+    if (!this.claim("whistle", at, dur)) return;
+    this.ftone(flavor, 1200, dur, "sine", 0.12, at, 400);
+  }
+
+  /** Rising charge: an orbital strike locking on. */
+  charge(flavor: OrdnanceSound, dur: number, at = 0) {
+    if (!this.claim("charge", at, dur)) return;
+    this.ftone(flavor, 200, dur, "sawtooth", 0.14, at, 1600);
+  }
+
+  /** Short sweep down: a beam firing. */
+  zap(flavor: OrdnanceSound, at = 0) {
+    if (!this.claim("zap", at, 0.3)) return;
+    this.ftone(flavor, 1400, 0.28, "square", 0.22, at, 120);
+  }
+
+  /** Two-tone warning siren. */
+  siren(flavor: OrdnanceSound, at = 0) {
+    if (!this.claim("siren", at, 1.2)) return;
+    for (let i = 0; i < 4; i++) this.ftone(flavor, i % 2 ? 880 : 660, 0.28, "square", 0.14, at + i * 0.3);
+  }
+
+  /** An explosion; `size` 0–1 scales depth and length. */
+  blast(flavor: OrdnanceSound, size: number, at = 0) {
+    if (!this.claim("blast", at, 0.5)) return;
+    this.ftone(flavor, 150 - size * 50, 0.35 + size * 0.4, "sine", 0.5 + size * 0.4, at, 35);
+    this.noise(flavor, 0.25 + size * 0.4, 0.3 + size * 0.3, at, { type: "lowpass", freq: 2400 - size * 1400, to: 200 });
+    if (flavor === "glitch") this.noise(flavor, 0.08, 0.3, at + 0.12, { type: "highpass", freq: 3000 });
+  }
+
+  /** Long sub drop plus a rumbling noise tail. */
+  nuke(flavor: OrdnanceSound, at = 0) {
+    if (!this.claim("nuke", at, 2.6)) return;
+    this.ftone(flavor, 60, 2.5, "sine", 1, at, 25);
+    this.noise(flavor, 2.2, 0.7, at, { type: "lowpass", freq: 900, to: 120 });
+  }
+
+  /** Reversed noise swell into a sub drop: a singularity collapsing. */
+  implode(flavor: OrdnanceSound, dur: number, at = 0) {
+    if (!this.claim("implode", at, dur + 0.6)) return;
+    this.noise(flavor, dur, 0.5, at, { type: "lowpass", freq: 300, to: 3000 }, true);
+    this.ftone(flavor, 220, 0.6, "sine", 0.9, at + dur, 28);
+  }
+
   dispose() {
     void this.ctx?.close();
     this.ctx = null;
     this.master = null;
+    this.noiseBuffer = null;
+    this.voices.clear();
   }
 }
 
@@ -602,8 +862,13 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
 
   // ---- spawners
 
+  /**
+   * Debris budget. The top CARRIER_RESERVE slots of the pool are left for
+   * ordnance bodies, so bombs still appear during a busy combo.
+   */
   function room(count: number): number {
-    return Math.max(0, Math.min(Math.round(count * quality * settings.density), maxParticles() - particles.length));
+    const free = maxParticles() - CARRIER_RESERVE - particles.length;
+    return Math.max(0, Math.min(Math.round(count * quality * settings.density), free));
   }
 
   function sparkKind(): ParticleKind {
@@ -615,11 +880,22 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
     }
   }
 
-  function burst(x: number, y: number, hue: number, requested: number, power: number, kind: ParticleKind = sparkKind()) {
+  /**
+   * `src` is the theme whose palette applies (ordnance keeps the theme it was
+   * dropped with); `dir`/`spread` aim the burst instead of a full circle.
+   */
+  function burst(
+    x: number, y: number, hue: number, requested: number, power: number, kind: ParticleKind = sparkKind(),
+    opts: { src?: Theme; dir?: number; spread?: number } = {},
+  ) {
     const count = room(requested);
-    const retro = theme.id === "retro";
+    const src = opts.src ?? theme;
+    const retro = src.id === "retro";
+    const spread = opts.spread ?? 0.6;
     for (let i = 0; i < count; i++) {
-      const angle = kind === "ember" ? rand(-Math.PI * 0.9, -Math.PI * 0.1) : rand(0, Math.PI * 2);
+      const angle =
+        opts.dir !== undefined ? opts.dir + rand(-spread, spread)
+        : kind === "ember" ? rand(-Math.PI * 0.9, -Math.PI * 0.1) : rand(0, Math.PI * 2);
       const speed = rand(0.25, 1) * power * (kind === "petal" ? 0.5 : kind === "code" ? 0.4 : 1);
       const long = kind === "ember" || kind === "petal" || kind === "code";
       const life = long ? rand(700, 1300) : rand(350, 800);
@@ -629,7 +905,7 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
         vy: Math.sin(angle) * speed - (kind === "spark" || kind === "pixel" ? power * 0.35 : 0),
         life, maxLife: life,
         size: kind === "shard" ? rand(3, 7) : kind === "pixel" ? (Math.random() < 0.5 ? 4 : 6) : kind === "petal" ? rand(4, 7) : rand(1.5, 3.8),
-        hue: retro ? theme.hue(Math.floor(rand(0, 7)), 0) : hue + rand(-25, 25),
+        hue: retro ? src.hue(Math.floor(rand(0, 7)), 0) : hue + rand(-25, 25),
         spin: rand(-0.3, 0.3),
         angle: rand(0, Math.PI * 2),
         text: kind === "code" ? MATRIX_CHARS[Math.floor(Math.random() * MATRIX_CHARS.length)] : undefined,
@@ -730,23 +1006,28 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
     timers.add(id);
   }
 
-  function flash(hue: number, x = window.innerWidth / 2, y = window.innerHeight / 2) {
-    for (const el of transient) if (el.classList.contains("pm-flash")) return; // one at a time
+  function flash(hue: number, x = window.innerWidth / 2, y = window.innerHeight / 2, big = false) {
+    for (const el of transient) {
+      if (!el.classList.contains("pm-flash")) continue;
+      if (!big) return; // one at a time; a big (white-out) flash replaces it
+      el.remove();
+      transient.delete(el);
+    }
     const el = document.createElement("div");
-    el.className = "pm-flash";
+    el.className = big ? "pm-flash pm-big" : "pm-flash";
     el.setAttribute("aria-hidden", "true");
     setTheme(el, hue);
     el.style.setProperty("--pm-fx", `${x}px`);
     el.style.setProperty("--pm-fy", `${y}px`);
     document.documentElement.appendChild(el);
     transient.add(el);
-    later(() => { el.remove(); transient.delete(el); }, 500);
+    later(() => { el.remove(); transient.delete(el); }, big ? 950 : 500);
   }
 
-  function slam(title: string, subtitle: string, hue: number, variant: "" | "quiet" | "agent" = "") {
+  function slam(title: string, subtitle: string, hue: number, variant: "" | "quiet" | "agent" = "", src: Theme = theme) {
     for (const el of transient) if (el.classList.contains("pm-slam")) { el.remove(); transient.delete(el); }
     const el = document.createElement("div");
-    el.className = `pm-slam${variant ? ` pm-${variant}` : ""}${theme.id === "retro" ? " pm-retro" : ""}`;
+    el.className = `pm-slam${variant ? ` pm-${variant}` : ""}${src.id === "retro" ? " pm-retro" : ""}`;
     el.setAttribute("aria-hidden", "true");
     setTheme(el, hue);
     el.textContent = title;
@@ -769,6 +1050,425 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
     if (settings.protectText) flash(hue);
     else flash(hue, x, y);
   }
+
+  // ---- paste ordnance
+  //
+  // Weapon bodies ("carriers") are `ordnance` particles tweened along arcs.
+  // Every detonation is scheduled with `arm()`, never detected in the frame
+  // loop, so a dropped frame can't skip an impact and tests stay deterministic.
+
+  interface Drop {
+    skin: OrdnanceSkin;
+    /** Theme captured at drop: switching themes mid-flight keeps the skin. */
+    src: Theme;
+    hue: number;
+    power: number;
+    shake: number;
+    chars: number;
+    tier: number;
+    lucky: boolean;
+    /** A combo milestone slammed on this paste: skip the small/warning slams. */
+    milestone: boolean;
+  }
+
+  /** Bumped on disable and dispose: stale detonation timers become no-ops. */
+  let ordnanceEpoch = 0;
+  let pendingOrdnance = 0;
+  /** A tier 7+ "event" (meteor shower, nuke, singularity) is running. */
+  let eventActive = false;
+  let armedThisPaste = 0;
+  let lastTier = 0;
+  /** Active singularity: live particles are pulled toward it. */
+  let pull: { x: number; y: number } | null = null;
+  let dim: HTMLElement | null = null;
+  /** Combo added by pastes beyond the old flat +10; excluded from records. */
+  let pasteBonus = 0;
+
+  function arm(fn: () => void, ms: number) {
+    const epoch = ordnanceEpoch;
+    pendingOrdnance++;
+    armedThisPaste++;
+    later(() => {
+      if (epoch !== ordnanceEpoch) return;
+      pendingOrdnance--;
+      if (disposed || !settings.enabled) return;
+      fn();
+      start();
+    }, ms);
+  }
+
+  function setDim(on: boolean) {
+    if (!on) {
+      dim?.remove();
+      dim = null;
+      return;
+    }
+    if (dim) return;
+    dim = document.createElement("div");
+    dim.className = lightMode ? "pm-dim pm-light" : "pm-dim";
+    dim.setAttribute("aria-hidden", "true");
+    document.documentElement.appendChild(dim);
+  }
+
+  /** Drop everything in flight (disable, dispose). */
+  function resetOrdnance() {
+    ordnanceEpoch++;
+    pendingOrdnance = 0;
+    eventActive = false;
+    pull = null;
+    pendingPaste = null;
+    pasteBonus = 0;
+    setDim(false);
+  }
+
+  /** The weapon for a paste, or null for the plain paste burst (no text, or over the caps). */
+  function planOrdnance(chars: number): OrdnancePick | null {
+    if (!(chars > 0)) return null;
+    let pick = pickOrdnance(chars, ordnanceRandom);
+    if (pick.tier >= EVENT_TIER && eventActive) {
+      pick = { tier: 5, count: ORDNANCE_COUNT[4][0], combo: ORDNANCE_COMBO[4], lucky: false };
+    }
+    if (pendingOrdnance + ORDNANCE_ARMS[pick.tier - 1] > MAX_PENDING_ORDNANCE) return null;
+    return pick;
+  }
+
+  function clampTo(v: number, size: number, margin = 24) {
+    return Math.min(Math.max(v, margin), Math.max(margin, size - margin));
+  }
+
+  /** A point in the viewport, `minR`–`maxR` from the caret and never within CARET_CLEARANCE of it. */
+  function impactNear(x: number, y: number, minR: number, maxR: number, angle?: number): { x: number; y: number } {
+    const W = window.innerWidth;
+    const H = window.innerHeight;
+    for (let i = 0; i < 12; i++) {
+      const a = angle !== undefined && i === 0 ? angle : rand(0, Math.PI * 2);
+      const r = rand(Math.max(minR, CARET_CLEARANCE), Math.max(maxR, CARET_CLEARANCE + 1));
+      const px = clampTo(x + Math.cos(a) * r, W);
+      const py = clampTo(y + Math.sin(a) * r, H);
+      if (Math.hypot(px - x, py - y) >= CARET_CLEARANCE) return { x: px, y: py };
+    }
+    // Caret in a tight corner: use the far side of the screen.
+    return { x: x < W / 2 ? clampTo(W - 24, W) : 24, y: clampTo(y, H) };
+  }
+
+  function debrisKind(d: Drop): ParticleKind {
+    return d.skin.debris;
+  }
+
+  function shardKind(d: Drop): ParticleKind {
+    return d.src.shape === "pixel" ? "pixel" : d.src.shape === "code" ? "code" : "shard";
+  }
+
+  /** One explosion in the dropped skin; `size` 0–1. */
+  function blast(d: Drop, x: number, y: number, size: number, opts: { flash?: boolean; big?: boolean; dir?: number } = {}) {
+    const aimed = opts.dir !== undefined ? { src: d.src, dir: opts.dir, spread: 1.1 } : { src: d.src };
+    burst(x, y, d.hue, (20 + 70 * size) * d.power, 6 + 8 * size, debrisKind(d), aimed);
+    if (d.src.shape === "glow") burst(x, y, (d.hue + 40) % 360, (6 + 24 * size) * d.power, 3 + 4 * size, "ember", { src: d.src });
+    ring(x, y, d.hue, 60 + 280 * size, 400 + 320 * size);
+    if (opts.flash) {
+      // Keep the flash's bright center off the text being typed.
+      if (settings.protectText) flash(d.hue, undefined, undefined, opts.big);
+      else flash(d.hue, x, y, opts.big);
+    }
+    screenShake((2 + 8 * size) * d.shake);
+    if (settings.sound) synth.blast(d.skin.sound, size);
+  }
+
+  /** Spawn a weapon body. Carriers skip `room()` and use the reserved slots. */
+  function carrier(
+    d: Drop, variant: OrdVariant,
+    o: { sx: number; sy: number; tx?: number; ty?: number; lift?: number; delay?: number; fly?: number; hold?: number;
+      ease?: Ord["ease"]; size?: number; sweep?: number },
+  ) {
+    if (particles.length >= maxParticles()) return; // only past the reserve, see room()
+    const delay = o.delay ?? 0;
+    const fly = Math.max(1, o.fly ?? 1);
+    const life = delay + fly + (o.hold ?? 0);
+    particles.push({
+      kind: "ordnance", x: o.sx, y: o.sy, vx: 0, vy: 0, life, maxLife: life,
+      size: o.size ?? 1, hue: d.hue, spin: rand(-0.25, 0.25), angle: 0,
+      ord: {
+        variant, skin: d.skin, sx: o.sx, sy: o.sy, tx: o.tx ?? o.sx, ty: o.ty ?? o.sy,
+        lift: o.lift ?? 0, delay, fly, ease: o.ease ?? "out", sweep: o.sweep,
+      },
+    });
+  }
+
+  function weaponSlam(d: Drop) {
+    if (d.milestone && d.tier <= 2) return; // don't cut off the milestone slam for a pop
+    const sub = `${d.lucky ? "LUCKY DROP · " : ""}${d.chars.toLocaleString("en-US")} CHARS`;
+    slam(d.skin.titles[d.tier - 1], sub, d.hue, d.tier <= 2 ? "quiet" : "", d.src);
+  }
+
+  // Tier 1: a string of pops crackling in a line next to the caret.
+  function firecracker(d: Drop, x: number, y: number, n: number) {
+    const W = window.innerWidth;
+    const side = x > W - 200 ? -1 : x < 200 ? 1 : Math.random() < 0.5 ? -1 : 1;
+    const dy = rand(-14, 14);
+    for (let i = 0; i < n; i++) {
+      const px = clampTo(x + side * (CARET_CLEARANCE + 8 + i * 16), W);
+      const py = clampTo(y + dy + rand(-5, 5), window.innerHeight);
+      const at = 80 + i * 60;
+      carrier(d, "cracker", { sx: px, sy: py, hold: at - 1 });
+      if (settings.sound) synth.crackle(d.skin.sound, at / 1000);
+      arm(() => {
+        burst(px, py, d.hue, 12 * d.power, 4, debrisKind(d), { src: d.src });
+        ring(px, py, d.hue, 34, 300);
+        if (i === 0) weaponSlam(d);
+        screenShake(1.2 * d.shake);
+      }, at);
+    }
+  }
+
+  // Tier 2: sticks tossed out on an arc; fuses burn, then pop.
+  function dynamite(d: Drop, x: number, y: number, n: number) {
+    for (let i = 0; i < n; i++) {
+      const p = impactNear(x, y, 60, 200);
+      const fly = 380;
+      const fuse = 600 + i * 120 + rand(0, 60);
+      carrier(d, "stick", { sx: x, sy: y, tx: p.x, ty: p.y, lift: 70, fly, hold: fuse });
+      if (settings.sound) synth.fuse(d.skin.sound, fuse / 1000, fly / 1000);
+      arm(() => {
+        blast(d, p.x, p.y, 0.35);
+        burst(p.x, p.y, d.hue, 14 * d.power, 7, shardKind(d), { src: d.src });
+        if (i === 0) weaponSlam(d);
+      }, fly + fuse);
+    }
+  }
+
+  // Tier 3: a canister splits at its apex; bomblets fan out and ripple.
+  function cluster(d: Drop, x: number, y: number, n: number) {
+    const apex = { x: clampTo(x + rand(-50, 50), window.innerWidth), y: Math.max(40, y - rand(120, 170)) };
+    const up = 420;
+    const drop = 300;
+    carrier(d, "canister", { sx: x, sy: y, tx: apex.x, ty: apex.y, lift: 30, fly: up });
+    const offset = rand(0, Math.PI * 2);
+    const spots = Array.from({ length: n }, (_, j) => impactNear(x, y, 90, 150, offset + (j / n) * Math.PI * 2));
+    arm(() => {
+      if (settings.sound) synth.pin(d.skin.sound);
+      burst(apex.x, apex.y, d.hue, 10 * d.power, 3, debrisKind(d), { src: d.src });
+      spots.forEach((s, j) => {
+        carrier(d, "bomblet", { sx: apex.x, sy: apex.y, tx: s.x, ty: s.y, lift: 40, fly: drop, hold: j * 70 });
+      });
+      weaponSlam(d);
+    }, up);
+    spots.forEach((s, j) => arm(() => blast(d, s.x, s.y, 0.28, { flash: j === n - 1 }), up + drop + j * 70));
+  }
+
+  // Tier 4: rockets from the screen edges curve into points around the caret.
+  function rockets(d: Drop, x: number, y: number, n: number) {
+    const W = window.innerWidth;
+    const H = window.innerHeight;
+    for (let i = 0; i < n; i++) {
+      const p = impactNear(x, y, 80, 240);
+      const side = Math.floor(rand(0, 3));
+      const s = side === 0 ? { x: -30, y: rand(0, H * 0.6) } : side === 1 ? { x: W + 30, y: rand(0, H * 0.6) } : { x: rand(0, W), y: -30 };
+      const delay = i * 90;
+      const fly = rand(350, 550);
+      carrier(d, "rocket", { sx: s.x, sy: s.y, tx: p.x, ty: p.y, lift: side === 2 ? 0 : rand(40, 120), delay, fly, ease: "in" });
+      if (settings.sound) synth.whoosh(d.skin.sound, delay / 1000);
+      const dir = Math.atan2(p.y - s.y, p.x - s.x);
+      arm(() => {
+        blast(d, p.x, p.y, 0.4, { dir, flash: i === n - 1 });
+        burst(p.x, p.y, d.hue, 10 * d.power, 9, shardKind(d), { src: d.src, dir, spread: 0.4 });
+        if (i === 0) weaponSlam(d);
+      }, delay + fly);
+    }
+  }
+
+  // Tier 5: a bomber crosses the top and drops a line of bombs on the caret's row.
+  function carpet(d: Drop, x: number, y: number, n: number) {
+    const W = window.innerWidth;
+    const row = clampTo(y, window.innerHeight, 40);
+    const top = 46;
+    const ltr = Math.random() < 0.5;
+    const startX = ltr ? -80 : W + 80;
+    const endX = ltr ? W + 80 : -80;
+    const pass = 1700;
+    carrier(d, "bomber", { sx: startX, sy: top, tx: endX, ty: top, fly: pass, ease: "linear" });
+    const margin = 60;
+    for (let i = 0; i < n; i++) {
+      const k = ltr ? i : n - 1 - i;
+      let bx = n === 1 ? W / 2 : margin + (k / (n - 1)) * Math.max(0, W - margin * 2);
+      if (Math.abs(bx - x) < CARET_CLEARANCE && Math.abs(row - y) < CARET_CLEARANCE) {
+        bx = clampTo(x + (bx >= x ? 1 : -1) * CARET_CLEARANCE, W);
+        if (Math.abs(bx - x) < CARET_CLEARANCE) bx = clampTo(x - (bx >= x ? 1 : -1) * CARET_CLEARANCE, W);
+      }
+      const tDrop = (pass * (bx - startX)) / (endX - startX);
+      const fall = 260 + Math.max(0, row - top) * 0.45;
+      carrier(d, "bomb", { sx: bx, sy: top + 10, tx: bx, ty: row, delay: tDrop, fly: fall, ease: "in" });
+      if (settings.sound) synth.whistle(d.skin.sound, fall / 1000, tDrop / 1000);
+      arm(() => {
+        blast(d, bx, row, 0.4, { flash: i === n - 1 });
+        if (i === 0) weaponSlam(d);
+      }, tDrop + fall);
+    }
+  }
+
+  // Tier 6: a reticle locks on, then a beam sweeps through three blasts.
+  function orbital(d: Drop, x: number, y: number) {
+    const H = window.innerHeight;
+    const W = window.innerWidth;
+    const above = y > 200;
+    const ty = clampTo(above ? y - rand(90, 150) : y + rand(90, 150), H, 40);
+    const tx = clampTo(x + rand(-80, 80), W, 180);
+    const lock = 600;
+    const fire = 520;
+    const sweep = 300 * (Math.random() < 0.5 ? -1 : 1);
+    carrier(d, "reticle", { sx: tx, sy: ty, hold: lock - 1 });
+    if (!d.milestone) slam(d.skin.lockTitle, "", d.hue, "quiet", d.src);
+    if (settings.sound) synth.charge(d.skin.sound, lock / 1000);
+    arm(() => {
+      carrier(d, "beam", { sx: tx - sweep / 2, sy: ty, tx: tx + sweep / 2, ty, fly: fire, hold: 120, ease: "linear" });
+      if (settings.sound) synth.zap(d.skin.sound);
+      weaponSlam(d);
+    }, lock);
+    for (let k = 0; k < 3; k++) {
+      const f = (k + 0.5) / 3;
+      const hx = clampTo(tx - sweep / 2 + sweep * f, W);
+      arm(() => blast(d, hx, ty, 0.5, { flash: k === 2 }), lock + fire * f);
+    }
+  }
+
+  // Tier 7 (event): the edges dim; meteors streak in from a top corner.
+  function meteors(d: Drop, x: number, y: number, n: number) {
+    const W = window.innerWidth;
+    eventActive = true;
+    setDim(true);
+    const fromLeft = Math.random() < 0.5;
+    const fly = 520;
+    let t = 0;
+    for (let i = 0; i < n; i++) {
+      if (i > 0) t += rand(120, 200);
+      const last = i === n - 1;
+      const p = impactNear(x, y, 80, 320);
+      const sx = fromLeft ? rand(-120, W * 0.3) : rand(W * 0.7, W + 120);
+      carrier(d, "meteor", { sx, sy: -60, tx: p.x, ty: p.y, delay: t, fly, ease: "in", size: last ? 2 : rand(0.8, 1.3) });
+      if (settings.sound) synth.whoosh(d.skin.sound, t / 1000);
+      arm(() => {
+        blast(d, p.x, p.y, last ? 0.9 : 0.45, { flash: last, big: last });
+        // Crater glow: slow embers that linger.
+        burst(p.x, p.y, (d.hue + 20) % 360, 12 * d.power, 1.2, d.src.shape === "glow" ? "ember" : debrisKind(d), { src: d.src });
+        if (i === 0) weaponSlam(d);
+      }, t + fly);
+    }
+    arm(() => {
+      eventActive = false;
+      setDim(false);
+    }, t + fly + 400);
+  }
+
+  // Tier 8 (event): siren, a slow bomb, a white-out, a mushroom cloud and aftershocks.
+  function nuke(d: Drop, x: number, y: number) {
+    eventActive = true;
+    const p = impactNear(x, y, 110, 220);
+    const fall = 1500;
+    if (!d.milestone) slam(d.skin.incomingTitle, "", d.hue, "", d.src);
+    if (settings.sound) {
+      synth.siren(d.skin.sound);
+      synth.whistle(d.skin.sound, (fall - 300) / 1000, 0.3);
+    }
+    carrier(d, "nuke", { sx: p.x, sy: -60, tx: p.x, ty: p.y, fly: fall, ease: "in" });
+    arm(() => {
+      blast(d, p.x, p.y, 1, { flash: true, big: true });
+      ring(p.x, p.y, d.hue, 600, 1300);
+      ring(p.x, p.y, (d.hue + 30) % 360, 450, 1050);
+      ring(p.x, p.y, (d.hue + 60) % 360, 300, 800);
+      // Mushroom stem: a rising column.
+      burst(p.x, p.y, (d.hue + 20) % 360, 40 * d.power, 6, d.src.shape === "glow" ? "ember" : debrisKind(d),
+        { src: d.src, dir: -Math.PI / 2, spread: 0.18 });
+      if (settings.lightning) for (let k = 0; k < 3; k++) bolt(p.x + rand(-60, 60), p.y, d.hue);
+      screenShake(12 * d.shake);
+      if (settings.sound) synth.nuke(d.skin.sound);
+      weaponSlam(d);
+    }, fall);
+    arm(() => {
+      // Mushroom cap spreading sideways.
+      const cy = Math.max(30, p.y - 150);
+      for (const dir of [0, Math.PI]) {
+        burst(p.x, cy, d.hue, 25 * d.power, 6, debrisKind(d), { src: d.src, dir, spread: 0.35 });
+      }
+      ring(p.x, cy, d.hue, 160, 700);
+    }, fall + 450);
+    for (let k = 0; k < 3; k++) {
+      arm(() => {
+        const q = impactNear(x, y, 110, 280);
+        blast(d, q.x, q.y, 0.45);
+        if (k === 2) eventActive = false;
+      }, fall + 350 * (k + 1));
+    }
+  }
+
+  // Tier 9 (event): a black hole pulls every particle in, then goes supernova.
+  function singularity(d: Drop, x: number, y: number) {
+    eventActive = true;
+    const p = impactNear(x, y, 100, 180);
+    const pullMs = 1200;
+    carrier(d, "hole", { sx: p.x, sy: p.y, hold: pullMs + 200 });
+    pull = { x: p.x, y: p.y };
+    if (settings.sound) synth.implode(d.skin.sound, pullMs / 1000);
+    arm(() => {
+      pull = null;
+      eventActive = false;
+      const W = window.innerWidth;
+      const H = window.innerHeight;
+      ring(p.x, p.y, d.hue, Math.hypot(W, H), 1400);
+      ring(p.x, p.y, (d.hue + 120) % 360, Math.max(W, H) * 0.6, 1000);
+      burst(p.x, p.y, d.hue, maxParticles(), 16, debrisKind(d), { src: d.src });
+      if (d.src.shape === "glow") burst(p.x, p.y, (d.hue + 60) % 360, maxParticles(), 8, "ember", { src: d.src });
+      if (settings.protectText) flash(d.hue, undefined, undefined, true);
+      else flash(d.hue, p.x, p.y, true);
+      if (settings.lightning) for (let k = 0; k < 6; k++) bolt(clampTo(p.x + rand(-300, 300), W), clampTo(p.y + rand(-120, 120), H), d.hue);
+      screenShake(12 * d.shake);
+      if (settings.sound) {
+        synth.blast(d.skin.sound, 1);
+        if (d.skin.sound === "soft") synth.chime();
+      }
+      weaponSlam(d);
+    }, pullMs);
+  }
+
+  function dropOrdnance(pick: OrdnancePick, x: number, y: number, chars: number, milestone: boolean) {
+    armedThisPaste = 0;
+    lastTier = pick.tier;
+    const tune = INTENSITY[settings.intensity];
+    const d: Drop = {
+      skin: ORDNANCE_SKINS[theme.id], src: theme, hue: theme.hue(combo, performance.now()),
+      power: tune.particles, shake: tune.shake, chars, tier: pick.tier, lucky: pick.lucky, milestone,
+    };
+    switch (pick.tier) {
+      case 1: firecracker(d, x, y, pick.count); break;
+      case 2: dynamite(d, x, y, pick.count); break;
+      case 3: cluster(d, x, y, pick.count); break;
+      case 4: rockets(d, x, y, pick.count); break;
+      case 5: carpet(d, x, y, pick.count); break;
+      case 6: orbital(d, x, y); break;
+      case 7: meteors(d, x, y, pick.count); break;
+      case 8: nuke(d, x, y); break;
+      default: singularity(d, x, y); break;
+    }
+  }
+
+  debugHook = () => {
+    let ordnance = 0;
+    let sum = 0;
+    let n = 0;
+    const kinds: Record<string, number> = {};
+    for (const p of particles) {
+      kinds[p.kind] = (kinds[p.kind] ?? 0) + 1;
+      if (p.kind === "ordnance") ordnance++;
+      else if (pull && p.kind !== "ring" && p.kind !== "bolt" && p.kind !== "glyph") {
+        sum += Math.hypot(p.x - pull.x, p.y - pull.y);
+        n++;
+      }
+    }
+    return {
+      particles: particles.length, maxParticles: maxParticles(), ordnance, pending: pendingOrdnance,
+      event: eventActive, lastArmed: armedThisPaste, lastTier, dimmed: dim !== null,
+      pullDistance: pull && n ? sum / n : null,
+      kinds,
+    };
+  };
 
   // ---- HUD
 
@@ -819,12 +1519,16 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
   // ---- combo
 
   function endCombo() {
-    if (combo >= 25 && combo > settings.bestCombo) {
-      slam(`×${combo}`, "NEW RECORD", theme.hue(combo, performance.now()));
-      updatePowerSettings({ bestCombo: combo });
+    // Records count paste bumps only up to the old flat +10 per paste, so one
+    // huge paste can't unlock combo achievements on its own.
+    const earned = combo - pasteBonus;
+    if (earned >= 25 && earned > settings.bestCombo) {
+      slam(`×${earned}`, "NEW RECORD", theme.hue(earned, performance.now()));
+      updatePowerSettings({ bestCombo: earned });
       if (settings.sound) synth.fanfare();
     }
     combo = 0;
+    pasteBonus = 0;
     keyLog.length = 0;
     hideHudIfIdle();
   }
@@ -865,6 +1569,60 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
 
   // ---- user input
 
+  // Paste length: `insertFromPaste` input events in <input>/<textarea> carry
+  // `data: null`, so the length is read from the paste/drop event just before
+  // it (only `.length`; the string is never copied or scanned).
+  interface PendingPaste { chars: number; target: HTMLElement; at: number; event: Event; epoch: number }
+  let pendingPaste: PendingPaste | null = null;
+  const PASTE_SLOT_MS = 1000;
+
+  function onPasteCapture(event: Event) {
+    if (!settings.enabled) return;
+    const target = editableTarget(event.composedPath()[0] ?? event.target);
+    if (!target) return;
+    const data = (event as ClipboardEvent).clipboardData ?? (event as DragEvent).dataTransfer ?? null;
+    let chars = 0;
+    try {
+      chars = data?.getData("text/plain").length ?? 0;
+    } catch {
+      chars = 0;
+    }
+    const slot: PendingPaste = { chars, target, at: performance.now(), event, epoch: ordnanceEpoch };
+    pendingPaste = slot;
+    later(() => {
+      if (pendingPaste !== slot) return; // the input event consumed it
+      pendingPaste = null;
+      // Rich editors (ProseMirror, Lexical, CodeMirror) cancel the native paste
+      // and insert the text themselves, so no input event follows.
+      if (slot.epoch !== ordnanceEpoch || !settings.enabled || !slot.event.defaultPrevented || slot.chars === 0) return;
+      if (!slot.target.isConnected || editableTarget(slot.target) !== slot.target) return;
+      attach();
+      const caret = caretOf(slot.target);
+      if (caret) react(slot.target, caret, { deleting: false, newline: false, pasted: true, data: null, chars: slot.chars });
+    }, 0);
+  }
+  document.addEventListener("paste", onPasteCapture, { capture: true, signal });
+  document.addEventListener("drop", onPasteCapture, { capture: true, signal });
+
+  function pasteLength(target: HTMLElement, event: InputEvent): number {
+    const slot = pendingPaste;
+    if (slot && performance.now() - slot.at < PASTE_SLOT_MS &&
+        (slot.target === target || slot.target.contains(target) || target.contains(slot.target))) {
+      pendingPaste = null;
+      return slot.chars;
+    }
+    const dropped = event.dataTransfer?.getData("text/plain").length;
+    if (dropped) return dropped;
+    // Length unknown: treat as a short paste.
+    return event.data?.length || 1;
+  }
+
+  function caretOf(target: HTMLElement): { x: number; y: number } | null {
+    return target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement
+      ? fieldCaret(target)
+      : selectionCaret(target);
+  }
+
   function onInput(event: Event) {
     if (!settings.enabled) return;
     const target = editableTarget(event.composedPath()[0] ?? event.target);
@@ -875,20 +1633,32 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
     const deleting = inputType.startsWith("delete");
     const newline = inputType === "insertParagraph" || inputType === "insertLineBreak" || inputEvent.data === "\n";
     const pasted = inputType === "insertFromPaste" || inputType === "insertFromDrop";
+    const chars = pasted ? pasteLength(target, inputEvent) : 0;
 
     attach();
     // Read layout once, before any writes in this handler.
-    const caret =
-      target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement
-        ? fieldCaret(target)
-        : selectionCaret(target);
+    const caret = caretOf(target);
     if (!caret) return;
+    react(target, caret, { deleting, newline, pasted, data: inputEvent.data, chars });
+  }
 
+  function react(
+    target: HTMLElement, caret: { x: number; y: number },
+    ev: { deleting: boolean; newline: boolean; pasted: boolean; data: string | null; chars: number },
+  ) {
+    const { deleting, newline, pasted, data } = ev;
     const now = performance.now();
     if (now - lastKeyAt > COMBO_TIMEOUT_MS && combo > 0) endCombo();
     lastKeyAt = now;
-    combo += pasted ? 10 : 1;
-    const typed = deleting || pasted ? 0 : Math.max(1, inputEvent.data?.length ?? 1);
+    // Pastes with text drop ordnance; empty (image/file) pastes and pastes over
+    // the caps keep the plain paste burst.
+    const pick = pasted ? planOrdnance(ev.chars) : null;
+    if (pasted) armedThisPaste = lastTier = 0;
+    const prev = combo;
+    const bump = pick ? pick.combo : pasted ? 10 : 1;
+    combo += bump;
+    if (pasted) pasteBonus += Math.max(0, bump - 10);
+    const typed = deleting || pasted ? 0 : Math.max(1, data?.length ?? 1);
     if (typed) keyLog.push({ t: now, n: typed });
 
     const tune = INTENSITY[settings.intensity];
@@ -898,23 +1668,24 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
     activeEditor = target;
     lastCaretX = x;
     lastCaretY = y;
+    const plainPaste = pasted && !pick;
 
     if (deleting) {
       burst(x, y, theme.id === "neon" || theme.id === "fire" ? 355 : hue, 8 * tune.particles, 5, theme.shape === "pixel" ? "pixel" : "shard");
       if (settings.shake) shakeElement(target, 3 * tune.shake);
     } else {
-      const count = (6 + heat * 14) * tune.particles * (pasted ? 5 : 1);
+      const count = (6 + heat * 14) * tune.particles * (plainPaste ? 5 : 1);
       burst(x, y, hue, count, 3 + heat * 6);
       if (heat > 0.25 && theme.shape === "glow") burst(x, y, (hue + 30) % 360, count / 4, 2, "ember");
-      if (settings.ghostLetters && inputEvent.data && !pasted) {
-        const chars = Array.from(inputEvent.data).slice(0, 3);
+      if (settings.ghostLetters && data && !pasted) {
+        const chars = Array.from(data).slice(0, 3);
         for (const ch of chars) if (ch.trim()) for (let i = 0; i < tune.glyphs; i++) glyph(x, y, hue, ch, 1 + heat * 0.8);
       }
       if (settings.shake) shakeElement(target, (2.5 + heat * 5) * tune.shake);
       if (settings.intensity === "godlike" && combo > 50) screenShake(1.2 * heat * tune.shake);
     }
 
-    if (newline || pasted) {
+    if (newline || plainPaste) {
       ring(x, y, hue, pasted ? 260 : 120);
       burst(x, y, hue, 30 * tune.particles, 9);
       if (settings.lightning && combo >= 25) bolt(x, y, hue);
@@ -924,21 +1695,23 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
 
     if (settings.sound) synth.key(combo, deleting);
 
-    const milestone = !deleting ? milestoneFor(combo) : null;
+    const milestone = !deleting ? milestoneCrossed(prev, combo) : null;
     if (milestone) onMilestone(milestone, x, y);
+    // After the milestone: weapon slams fire at detonation, after its slam.
+    if (pick) dropOrdnance(pick, x, y, ev.chars, milestone !== null);
 
     showHud("COMBO", combo, tierName(combo), hue);
     const speed = wpm(now);
     wpmText = setText(hudWpm, speed > 0 ? `${speed} WPM` : "", wpmText);
     vignette.style.opacity = (Math.round(heat * 10) / 20).toFixed(2); // ≤ .5, 11 steps
 
-    const currentCombo = combo;
+    const earned = combo - pasteBonus;
     recordStats((s) => ({
       ...s,
       chars: s.chars + typed,
       deletes: s.deletes + (deleting ? 1 : 0),
       pastes: s.pastes + (pasted ? 1 : 0),
-      bestCombo: Math.max(s.bestCombo, currentCombo),
+      bestCombo: Math.max(s.bestCombo, earned),
       bestWpm: keyLog.length >= 15 ? Math.max(s.bestWpm, speed) : s.bestWpm,
     }));
     start();
@@ -1132,6 +1905,379 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
     c.stroke();
   }
 
+  // ---- ordnance rendering
+  //
+  // One draw treatment per skin style (tube, solid, glyph, paper, hardedge,
+  // pixel) over shared per-variant geometry, so the 6 × 9 skins stay table-driven.
+
+  /** Pixel-art sprites for the retro style: `#` body, `o` highlight, `*` spark. */
+  const PIXEL_SPRITES: Partial<Record<OrdVariant, string[]>> = {
+    cracker: ["*", "#", "#", "#"],
+    stick: ["..*", ".#.", "###", "#o#", "###", ".#."],
+    bomblet: [".#.", "#o#", ".#."],
+    canister: ["####", "#oo#", "####", "#oo#", "####"],
+    rocket: ["#....", "###..", "####o", "###..", "#...."],
+    bomber: ["..##......", "..###.....", "#########o", "..###.....", "..##......"],
+    bomb: ["..#..", ".###.", "#####", "#ooo#", ".###.", "#.#.#"],
+    meteor: [".##.", "####", "#oo#", ".##."],
+    nuke: [".###.", "#####", "#o#o#", "#####", "#####", ".###.", "#.#.#"],
+  };
+
+  /** Labels for the glyph (Matrix) style. */
+  const GLYPH_LABELS: Partial<Record<OrdVariant, string>> = {
+    cracker: "*", stick: "TNT", canister: "{…}", rocket: "=>>", bomber: "[▓▓▓]",
+    bomb: "[0]", meteor: "█", nuke: "☢", hole: "NULL",
+  };
+
+  /** Variant body as a path in local coordinates (+x is "forward"). */
+  function bodyPath(c: CanvasRenderingContext2D, o: Ord, size: number) {
+    c.beginPath();
+    const paper = o.skin.style === "paper";
+    switch (o.variant) {
+      case "cracker": c.rect(-3, -6, 6, 12); break;
+      case "stick":
+        if (paper) { c.rect(-9, -10, 6, 20); c.rect(-3, -10, 6, 20); c.rect(3, -10, 6, 20); }
+        else c.rect(-4, -11, 8, 22);
+        break;
+      case "canister": c.roundRect(-7, -10, 14, 20, paper ? 7 : 3); break;
+      case "bomblet": c.arc(0, 0, 4.5, 0, Math.PI * 2); break;
+      case "rocket":
+        c.moveTo(13, 0); c.lineTo(4, -4); c.lineTo(-9, -4); c.lineTo(-14, -9); c.lineTo(-14, 9); c.lineTo(-9, 4); c.lineTo(4, 4);
+        c.closePath();
+        break;
+      case "bomber":
+        if (paper) {
+          // Paper crane.
+          c.moveTo(26, -6); c.lineTo(4, 2); c.lineTo(-22, -10); c.lineTo(-8, 4); c.lineTo(-26, -4); c.lineTo(-4, 8); c.lineTo(10, 4);
+          c.closePath();
+          c.moveTo(-2, 2); c.lineTo(-14, -26); c.lineTo(8, 0); c.closePath();
+        } else {
+          c.ellipse(0, 0, 30, 6, 0, 0, Math.PI * 2);
+          c.moveTo(8, 0); c.lineTo(-6, -24); c.lineTo(-13, -24); c.lineTo(-4, 0); c.lineTo(-13, 24); c.lineTo(-6, 24); c.closePath();
+          c.moveTo(-22, 0); c.lineTo(-30, -10); c.lineTo(-34, -10); c.lineTo(-30, 0); c.closePath();
+        }
+        break;
+      case "bomb":
+        if (paper) c.roundRect(-8, -7, 16, 14, 6); // lantern
+        else { c.ellipse(0, 0, 9, 5, 0, 0, Math.PI * 2); c.moveTo(-7, 0); c.lineTo(-14, -6); c.lineTo(-14, 6); c.closePath(); }
+        break;
+      case "nuke":
+        c.ellipse(0, 0, 24, 13, 0, 0, Math.PI * 2);
+        c.moveTo(-20, 0); c.lineTo(-33, -12); c.lineTo(-33, 12); c.closePath();
+        break;
+      case "meteor": c.arc(0, 0, 6 * size, 0, Math.PI * 2); break;
+      default: c.arc(0, 0, 5, 0, Math.PI * 2);
+    }
+  }
+
+  function drawPixelSprite(c: CanvasRenderingContext2D, rows: string[], cell: number, hue: number) {
+    const w = rows[0].length * cell;
+    const h = rows.length * cell;
+    for (let r = 0; r < rows.length; r++) {
+      for (let k = 0; k < rows[r].length; k++) {
+        const ch = rows[r][k];
+        if (ch === ".") continue;
+        c.fillStyle = ch === "*" ? hsl(50, 60) : ch === "o" ? hsl(hue, 80) : hsl(hue, 45);
+        c.fillRect(k * cell - w / 2, r * cell - h / 2, cell, cell);
+      }
+    }
+  }
+
+  /** Fill/stroke the current body path in the skin's treatment. */
+  function paintBody(c: CanvasRenderingContext2D, o: Ord, p: Particle) {
+    switch (o.skin.style) {
+      case "tube":
+        c.globalAlpha = 0.18;
+        c.fillStyle = hsl(p.hue, 60);
+        c.fill();
+        c.globalAlpha = 1;
+        c.lineWidth = 2;
+        c.strokeStyle = hsl(p.hue, 70);
+        c.stroke();
+        break;
+      case "solid":
+        c.fillStyle = hsl(p.hue - 8, 32);
+        c.fill();
+        c.lineWidth = 1.5;
+        c.strokeStyle = hsl(p.hue + 20, 58);
+        c.stroke();
+        break;
+      case "paper":
+        c.fillStyle = hsl(p.hue, 82);
+        c.fill();
+        c.lineWidth = 1.5;
+        c.strokeStyle = lightMode ? hsl(p.hue, 30) : "#fff";
+        c.stroke();
+        break;
+      default: {
+        // hardedge: chromatic split (cyan/magenta ghosts), occasional glitch slice.
+        const jitter = Math.random() < 0.12 ? rand(-5, 5) : 0;
+        c.globalAlpha = 0.65;
+        c.translate(-2 + jitter, 0);
+        c.fillStyle = hsl(185, 55);
+        c.fill();
+        c.translate(4, 0);
+        c.fillStyle = hsl(305, 55);
+        c.fill();
+        c.translate(-2 - jitter, 0);
+        c.globalAlpha = 1;
+        c.fillStyle = hsl(p.hue, 60);
+        c.fill();
+      }
+    }
+  }
+
+  function setLocal(c: CanvasRenderingContext2D, x: number, y: number, angle: number, scale = 1) {
+    const cos = Math.cos(angle) * scale * DPR;
+    const sin = Math.sin(angle) * scale * DPR;
+    c.setTransform(cos, sin, -sin, cos, x * DPR, y * DPR);
+  }
+
+  function glowAt(x: number, y: number, hue: number, r: number, alpha: number, useBloom: boolean) {
+    const sprite = glowSprite(hue);
+    if (ctx) {
+      ctx.globalCompositeOperation = glowBlend();
+      ctx.globalAlpha = alpha;
+      ctx.drawImage(sprite, x - r, y - r, r * 2, r * 2);
+    }
+    if (useBloom && bctx) {
+      const br = r * 2.4;
+      bctx.globalAlpha = alpha;
+      bctx.drawImage(sprite, x - br, y - br, br * 2, br * 2);
+    }
+  }
+
+  /** A single trail/fuse particle; skipped when the pool is full. */
+  function puff(x: number, y: number, hue: number, kind: ParticleKind, vx = rand(-0.4, 0.4), vy = rand(-0.6, 0.2)) {
+    if (particles.length >= maxParticles() - CARRIER_RESERVE || Math.random() > quality) return;
+    const life = rand(300, 650);
+    particles.push({
+      kind, x, y, vx, vy, life, maxLife: life,
+      size: kind === "pixel" ? 3 : kind === "petal" ? rand(2.5, 4) : rand(1.2, 2.6),
+      hue: hue + rand(-15, 15), spin: rand(-0.3, 0.3), angle: rand(0, Math.PI * 2),
+      text: kind === "code" ? MATRIX_CHARS[Math.floor(Math.random() * MATRIX_CHARS.length)] : undefined,
+    });
+  }
+
+  function trailKind(o: Ord): ParticleKind {
+    return o.skin.debris === "spark" ? "ember" : o.skin.debris;
+  }
+
+  function drawOrdnance(c: CanvasRenderingContext2D, p: Particle, step: number, useBloom: boolean) {
+    const o = p.ord!;
+    const elapsed = p.maxLife - p.life;
+    if (elapsed < o.delay) return;
+    const e0 = Math.min(1, (elapsed - o.delay) / o.fly);
+    const e = o.ease === "in" ? e0 * e0 : o.ease === "out" ? 1 - (1 - e0) * (1 - e0) : e0;
+    const px = p.x;
+    const py = p.y;
+    p.x = o.sx + (o.tx - o.sx) * e;
+    p.y = o.sy + (o.ty - o.sy) * e - o.lift * 4 * e * (1 - e);
+    const moving = e0 < 1 && elapsed - o.delay > 0;
+    if (moving && (p.x !== px || p.y !== py)) {
+      p.vx = p.x - px;
+      p.vy = p.y - py;
+    }
+    const t = p.life / p.maxLife;
+    const style = o.skin.style;
+    c.globalCompositeOperation = "source-over";
+    c.globalAlpha = 1;
+
+    switch (o.variant) {
+      case "reticle": {
+        // Shrinks while locking on; blinks, then holds steady.
+        const k = elapsed / Math.max(1, p.maxLife);
+        if (k < 0.7 && Math.floor(elapsed / 90) % 2 === 1) break;
+        const r = 22 + 46 * (1 - k);
+        c.setTransform(DPR, 0, 0, DPR, 0, 0);
+        c.strokeStyle = hsl(p.hue, 60);
+        c.lineWidth = style === "pixel" ? 3 : 2;
+        c.beginPath();
+        if (style === "pixel") c.rect(Math.round(p.x - r), Math.round(p.y - r), Math.round(r * 2), Math.round(r * 2));
+        else c.arc(p.x, p.y, r, 0, Math.PI * 2);
+        for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          c.moveTo(p.x + dx * r * 0.55, p.y + dy * r * 0.55);
+          c.lineTo(p.x + dx * r * 1.35, p.y + dy * r * 1.35);
+        }
+        c.stroke();
+        if (style === "glyph") {
+          c.font = `700 13px ${THEMES.matrix.font}`;
+          c.textAlign = "center";
+          c.textBaseline = "middle";
+          c.fillStyle = hsl(p.hue, 70);
+          c.fillText(o.skin.lockTitle, p.x, p.y - r - 14);
+        }
+        glowAt(p.x, p.y, p.hue, 8, 0.9, useBloom);
+        break;
+      }
+      case "beam": {
+        // A column from the top of the screen, sweeping sideways.
+        const w = style === "hardedge" ? 10 : 16;
+        const bx = style === "pixel" ? Math.round(p.x / 4) * 4 : p.x;
+        c.setTransform(DPR, 0, 0, DPR, 0, 0);
+        const fade = Math.min(1, t * 4);
+        if (style === "glyph") {
+          c.font = `700 15px ${THEMES.matrix.font}`;
+          c.textAlign = "center";
+          c.textBaseline = "middle";
+          c.fillStyle = hsl(p.hue, 70);
+          c.globalAlpha = fade;
+          for (let gy = (elapsed / 4) % 18; gy < p.y; gy += 18) {
+            c.fillText(MATRIX_CHARS[(Math.floor(gy) * 7 + Math.floor(elapsed / 60)) % MATRIX_CHARS.length], bx, gy);
+          }
+        } else {
+          if (style === "hardedge") {
+            c.globalAlpha = 0.6 * fade;
+            c.fillStyle = hsl(185, 55);
+            c.fillRect(bx - w / 2 - 4, 0, w, p.y);
+            c.fillStyle = hsl(305, 55);
+            c.fillRect(bx - w / 2 + 4, 0, w, p.y);
+          }
+          c.globalAlpha = 0.55 * fade;
+          c.fillStyle = hsl(p.hue, 60);
+          c.fillRect(bx - w / 2, 0, w, p.y);
+          c.globalAlpha = fade;
+          c.fillStyle = lightMode ? hsl(p.hue, 20) : "#fff";
+          c.fillRect(bx - w / 6, 0, w / 3, p.y);
+        }
+        if (useBloom && bctx) {
+          bctx.globalAlpha = 0.8 * fade;
+          bctx.fillStyle = hsl(p.hue, 60);
+          bctx.fillRect(bx - w * 1.5, 0, w * 3, p.y);
+        }
+        glowAt(bx, p.y, p.hue, 40, fade, useBloom);
+        break;
+      }
+      case "hole": {
+        // Opens, wobbles (lensing), then collapses in its last 200 ms.
+        const open = Math.min(1, elapsed / 300);
+        const collapse = Math.min(1, p.life / 200);
+        const r = (6 + 22 * open) * collapse;
+        p.angle += 0.08 * step;
+        const wob = 1 + Math.sin(elapsed / 70) * 0.12;
+        c.setTransform(DPR, 0, 0, DPR, 0, 0);
+        c.lineWidth = style === "pixel" ? 4 : 3;
+        for (let k = 0; k < 2; k++) {
+          c.strokeStyle = hsl(p.hue + k * 40, 60 + k * 10);
+          c.globalAlpha = 0.9 - k * 0.3;
+          c.beginPath();
+          c.ellipse(p.x, p.y, r * (2.3 + k * 0.5) * wob, r * (0.8 + k * 0.2) / wob, p.angle + k, 0, Math.PI * 2);
+          c.stroke();
+        }
+        c.globalAlpha = 1;
+        c.fillStyle = "#000";
+        c.beginPath();
+        if (style === "pixel") c.rect(Math.round(p.x - r), Math.round(p.y - r), Math.round(r * 2), Math.round(r * 2));
+        else c.arc(p.x, p.y, r, 0, Math.PI * 2);
+        c.fill();
+        if (style === "glyph") {
+          c.font = `700 12px ${THEMES.matrix.font}`;
+          c.textAlign = "center";
+          c.textBaseline = "middle";
+          c.fillStyle = hsl(p.hue, 70);
+          c.fillText(GLYPH_LABELS.hole!, p.x, p.y + r + 14);
+        }
+        if (useBloom && bctx) {
+          bctx.globalAlpha = 0.9;
+          bctx.strokeStyle = hsl(p.hue, 60);
+          bctx.lineWidth = 12;
+          bctx.beginPath();
+          bctx.ellipse(p.x, p.y, r * 2.4 * wob, r * 0.9 / wob, p.angle, 0, Math.PI * 2);
+          bctx.stroke();
+        }
+        break;
+      }
+      default: {
+        // Rockets and meteors face their flight; bombs face down; sticks and
+        // canisters tumble while airborne.
+        let angle = 0;
+        if (o.variant === "rocket" || o.variant === "meteor") angle = Math.atan2(p.vy, p.vx);
+        else if (o.variant === "bomb" || o.variant === "nuke") angle = Math.PI / 2;
+        else if (o.variant === "bomber") angle = o.tx < o.sx ? Math.PI : 0;
+        else if (moving) { p.angle += p.spin * step; angle = p.angle; }
+        else angle = p.angle;
+        const size = o.variant === "meteor" ? p.size : 1;
+
+        if (o.variant === "meteor") {
+          // Long glowing tail behind the head.
+          const len = 90 * size;
+          const back = Math.atan2(p.vy, p.vx) + Math.PI;
+          c.setTransform(DPR, 0, 0, DPR, 0, 0);
+          const tx = p.x + Math.cos(back) * len;
+          const ty = p.y + Math.sin(back) * len;
+          const grad = c.createLinearGradient(p.x, p.y, tx, ty);
+          grad.addColorStop(0, hsl(p.hue, 70));
+          grad.addColorStop(1, "rgba(0,0,0,0)");
+          c.strokeStyle = grad;
+          c.lineWidth = 5 * size;
+          c.lineCap = "round";
+          c.beginPath();
+          c.moveTo(p.x, p.y);
+          c.lineTo(tx, ty);
+          c.stroke();
+          c.lineCap = "butt";
+        }
+
+        if (style === "glyph") {
+          let label = GLYPH_LABELS[o.variant] ?? (p.spin > 0 ? "1" : "0");
+          if (o.variant === "rocket" && p.vx < 0) label = "<<=";
+          setLocal(c, p.x, p.y, 0);
+          c.font = `700 ${o.variant === "nuke" ? 34 : o.variant === "meteor" ? Math.round(15 * size) : 16}px ${THEMES.matrix.font}`;
+          c.textAlign = "center";
+          c.textBaseline = "middle";
+          c.fillStyle = hsl(p.hue, 72);
+          c.fillText(label, 0, 0);
+        } else if (style === "pixel") {
+          const rows = PIXEL_SPRITES[o.variant];
+          if (rows) {
+            const cell = o.variant === "nuke" ? 6 : o.variant === "meteor" ? Math.round(3 * size) : 3;
+            const flip = (o.variant === "rocket" || o.variant === "bomber") && (p.vx < 0 || o.tx < o.sx);
+            c.setTransform(flip ? -DPR : DPR, 0, 0, DPR, Math.round(p.x / 2) * 2 * DPR, Math.round(p.y / 2) * 2 * DPR);
+            drawPixelSprite(c, rows, cell, p.hue);
+          }
+        } else {
+          setLocal(c, p.x, p.y, angle);
+          bodyPath(c, o, size);
+          paintBody(c, o, p);
+          if (o.variant === "nuke" && style !== "paper") {
+            // Hazard band.
+            c.fillStyle = hsl(55, 55);
+            c.fillRect(-4, -11, 5, 22);
+          }
+        }
+        c.setTransform(DPR, 0, 0, DPR, 0, 0);
+
+        // Fuse on landed sticks: shrinks and spits sparks.
+        if (o.variant === "stick" && !moving) {
+          const left = p.life / Math.max(1, p.maxLife - o.fly);
+          const fx = p.x + 4;
+          const fy = p.y - 11 - 12 * left;
+          c.strokeStyle = hsl(30, 40);
+          c.lineWidth = 1.5;
+          c.beginPath();
+          c.moveTo(p.x, p.y - 11);
+          c.lineTo(fx, fy);
+          c.stroke();
+          glowAt(fx, fy, 45, 7, 0.9, useBloom);
+          if (Math.random() < 0.4) puff(fx, fy, 40, o.skin.debris === "pixel" ? "pixel" : o.skin.debris === "code" ? "code" : "spark", rand(-1.2, 1.2), rand(-2, -0.5));
+        }
+        if (o.variant === "cracker") glowAt(p.x, p.y - 7, 45, 5, 0.7, useBloom);
+        // Trails for things in flight.
+        if (moving && (o.variant === "rocket" || o.variant === "meteor" || o.variant === "nuke") && Math.random() < 0.7) {
+          puff(p.x - p.vx, p.y - p.vy, p.hue + 20, trailKind(o));
+        }
+        if (useBloom && bctx && o.variant !== "cracker") {
+          const r = (o.variant === "nuke" ? 30 : o.variant === "bomber" ? 26 : 10) * size;
+          bctx.globalAlpha = 0.7;
+          bctx.drawImage(glowSprite(p.hue), p.x - r * 2, p.y - r * 2, r * 4, r * 4);
+        }
+      }
+    }
+    c.setTransform(DPR, 0, 0, DPR, 0, 0);
+    c.globalAlpha = 1;
+    c.globalCompositeOperation = glowBlend();
+  }
+
   function frame(now: number) {
     if (disposed) { raf = 0; return; }
     // Keep raf set while rendering: combo records/achievements can synchronously
@@ -1141,7 +2287,7 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
     } finally {
       raf = 0;
     }
-    if (particles.length > 0 || shakes.size > 0 || combo > 0 || agentWords > 0) {
+    if (particles.length > 0 || shakes.size > 0 || combo > 0 || agentWords > 0 || pendingOrdnance > 0) {
       raf = requestAnimationFrame(frame);
     } else {
       clearCanvases();
@@ -1209,7 +2355,20 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
         if (p.life <= 0) continue;
         particles[w++] = p;
         const t = p.life / p.maxLife; // 1 → 0
+        if (pull && p.kind !== "ring" && p.kind !== "bolt" && p.kind !== "glyph" && p.kind !== "ordnance") {
+          // Singularity: bend velocities toward the hole; swallow what reaches it.
+          const dx = pull.x - p.x;
+          const dy = pull.y - p.y;
+          const dist = Math.hypot(dx, dy) || 1;
+          const f = Math.min(1.4, 700 / (dist + 80)) * step;
+          p.vx += (dx / dist) * f;
+          p.vy += (dy / dist) * f;
+          if (dist < 14) p.life = Math.min(p.life, 50);
+        }
         switch (p.kind) {
+          case "ordnance":
+            drawOrdnance(ctx, p, step, useBloom);
+            break;
           case "spark":
           case "ember": {
             p.vy += (p.kind === "ember" ? -0.03 : 0.22 * g) * step;
@@ -1422,6 +2581,7 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
       if (next.sound) synth.powerUp();
       start();
     } else if (was && !next.enabled) {
+      resetOrdnance();
       combo = 0;
       agentWords = 0;
       agentMilestone = 0;
@@ -1465,6 +2625,8 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
     if (agentFlushTimer) window.clearTimeout(agentFlushTimer);
     for (const id of timers) window.clearTimeout(id);
     timers.clear();
+    resetOrdnance();
+    debugHook = null;
     restoreShakes();
     clearCanvases();
     for (const el of transient) el.remove();

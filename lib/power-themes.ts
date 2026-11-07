@@ -125,3 +125,79 @@ export const THEMES: Record<ThemeId, Theme> = {
     },
   },
 };
+
+// ---------------------------------------------------------------- paste ordnance skins
+//
+// Pasting drops "ordnance" whose weapon tier (1–9) grows with the paste size.
+// The choreography is shared; each theme re-skins how the weapons are drawn,
+// what their explosions scatter, their slam titles, and their sound.
+
+/** Draw treatment for ordnance bodies. */
+export type OrdnanceStyle = "tube" | "solid" | "glyph" | "paper" | "hardedge" | "pixel";
+/** Particle kind ordnance explosions scatter. */
+export type OrdnanceDebris = "spark" | "ember" | "code" | "petal" | "pixel";
+/** Synth flavor: changes oscillator shapes and the noise mix. */
+export type OrdnanceSound = "standard" | "heavy" | "bit" | "soft" | "glitch" | "chip";
+
+export interface OrdnanceSkin {
+  style: OrdnanceStyle;
+  debris: OrdnanceDebris;
+  sound: OrdnanceSound;
+  /** Slam title per tier, 1 → 9. */
+  titles: readonly [string, string, string, string, string, string, string, string, string];
+  /** Warning slam shown while the orbital strike locks on. */
+  lockTitle: string;
+  /** Warning slam shown while the nuke falls. */
+  incomingTitle: string;
+}
+
+export const ORDNANCE_SKINS: Record<ThemeId, OrdnanceSkin> = {
+  neon: {
+    style: "tube",
+    debris: "spark",
+    sound: "standard",
+    titles: ["POP", "OVERLOAD", "SPLIT SHOT", "NEON STRIKE", "LIGHT SHOW", "LASER LOCK", "STARFALL", "☢ MELTDOWN ☢", "EVENT HORIZON"],
+    lockTitle: "TARGET LOCKED",
+    incomingTitle: "⚠ INCOMING ⚠",
+  },
+  fire: {
+    style: "solid",
+    debris: "ember",
+    sound: "heavy",
+    titles: ["CRACKLE", "KA-BOOM", "SHRAPNEL", "HELLFIRE", "FIRESTORM", "SUN LANCE", "ARMAGEDDON", "☢ TACTICAL NUKE ☢", "SUPERNOVA"],
+    lockTitle: "TARGET LOCKED",
+    incomingTitle: "⚠ INCOMING ⚠",
+  },
+  matrix: {
+    style: "glyph",
+    debris: "code",
+    sound: "bit",
+    titles: ["ping", "EXEC TNT", "fork()", "PAYLOAD DELIVERED", "rm -rf /", "sudo strike", "STACK OVERFLOW", "☢ SYSTEM FAILURE ☢", "SEGFAULT"],
+    lockTitle: "> TARGET ACQUIRED",
+    incomingTitle: "⚠ INCOMING ⚠",
+  },
+  sakura: {
+    style: "paper",
+    debris: "petal",
+    sound: "soft",
+    titles: ["PON!", "PACHI!", "KUSUDAMA", "HANABI", "PETAL STORM", "MOONBEAM", "SHOOTING STARS", "🌸 FULL BLOOM 🌸", "ETERNAL SPRING"],
+    lockTitle: "TARGET LOCKED",
+    incomingTitle: "⚠ INCOMING ⚠",
+  },
+  cyberpunk: {
+    style: "hardedge",
+    debris: "spark",
+    sound: "glitch",
+    titles: ["BLIP", "EMP", "MINEFIELD", "MISSILE LOCK", "DRONE STRIKE", "RAILGUN", "DEORBIT", "☢ BLACKOUT ☢", "DATA COLLAPSE"],
+    lockTitle: "UPLINK LOCKED",
+    incomingTitle: "⚠ INCOMING ⚠",
+  },
+  retro: {
+    style: "pixel",
+    debris: "pixel",
+    sound: "chip",
+    titles: ["POP!", "BOMB!", "COMBO BREAKER", "1UP BARRAGE", "BOMBER RUN", "ZAP!", "ASTEROIDS", "☢ GAME OVER ☢", "CONTINUE? 9…"],
+    lockTitle: "TARGET LOCKED",
+    incomingTitle: "⚠ INCOMING ⚠",
+  },
+};
