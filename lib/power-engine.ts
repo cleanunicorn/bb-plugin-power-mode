@@ -662,7 +662,50 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
 
   // ---- shake (composited: `translate` on an element promoted with will-change)
 
+  // Panel changes reflow the transcript. Keep random offsets out of that
+  // measurement pass, and wait until resizing has stopped before shaking again.
+  let shakeResumeAt = 0;
+  const shakeViewports = new Map<Element, { width: number; height: number } | null>();
+  const shakeResizeObserver = new ResizeObserver((entries) => {
+    for (const entry of entries) {
+      const previous = shakeViewports.get(entry.target);
+      const { width, height } = entry.contentRect;
+      shakeViewports.set(entry.target, { width, height });
+      if (previous && (previous.width !== width || previous.height !== height)) {
+        shakeResumeAt = performance.now() + 250;
+        restoreShakes();
+      }
+    }
+  });
+
+  function watchShakeViewport(el: HTMLElement) {
+    // Observe the scroll viewport, not the growing reply: normal streaming
+    // changes content height and should still produce effects.
+    for (let parent = el.parentElement; parent; parent = parent.parentElement) {
+      const overflow = getComputedStyle(parent).overflowY;
+      if (overflow !== "auto" && overflow !== "scroll") continue;
+      if (!shakeViewports.has(parent)) {
+        shakeViewports.set(parent, null);
+        shakeResizeObserver.observe(parent);
+      }
+      break;
+    }
+    for (const viewport of shakeViewports.keys()) {
+      if (!viewport.isConnected) {
+        shakeResizeObserver.unobserve(viewport);
+        shakeViewports.delete(viewport);
+      }
+    }
+  }
+
+  window.addEventListener("resize", () => {
+    shakeResumeAt = performance.now() + 250;
+    restoreShakes();
+  }, { signal });
+
   function shakeElement(el: HTMLElement, amp: number) {
+    watchShakeViewport(el);
+    if (performance.now() < shakeResumeAt) return;
     const existing = shakes.get(el);
     if (existing) {
       existing.amp = Math.min(existing.amp + amp, 22);
@@ -977,7 +1020,10 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
         const tail = Array.from(node.data.slice(-Math.min(delta, 4))).filter((c) => c.trim());
         for (const ch of tail.slice(-2)) glyph(point.x, point.y, hue, ch, 0.9);
       }
-      if (settings.shake) shakeElement(row, 1.2 * tune.shake);
+      // The row is a scroll/layout anchor. Shake its contents so the row's
+      // bounds remain stable while bb measures and positions messages.
+      const content = row.firstElementChild;
+      if (settings.shake && content instanceof HTMLElement) shakeElement(content, 1.2 * tune.shake);
     }
     touched.clear();
     if (totalDelta <= 0) return;
@@ -1528,6 +1574,8 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
     disposed = true;
     unsubscribe();
     observer.disconnect();
+    shakeResizeObserver.disconnect();
+    shakeViewports.clear();
     modeObserver.disconnect();
     if (modeCheck) cancelAnimationFrame(modeCheck);
     agentHooks = null;
