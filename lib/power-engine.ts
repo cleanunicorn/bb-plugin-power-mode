@@ -11,7 +11,7 @@
 // browser upscales (bilinear) for a soft, strong glow at ~1/16 the fill cost.
 //
 // Everything it creates — canvases, HUD, styles, listeners, observers, timers,
-// inline `translate`/`will-change` values — is removed when the signal aborts.
+// inline shake offsets — is restored or removed when the signal aborts.
 
 import { toast } from "sonner";
 import {
@@ -109,6 +109,12 @@ interface Particle {
 interface ShakeState {
   prev: string;
   prevWillChange: string;
+  baseTranslate: string;
+  prevPosition?: string;
+  prevLeft?: string;
+  prevTop?: string;
+  baseLeft?: number;
+  baseTop?: number;
   amp: number;
 }
 
@@ -435,8 +441,7 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
   style.textContent = CSS;
   document.head.appendChild(style);
 
-  // Overlays live on <html>, outside <body>, so screen shake (which translates
-  // <body>) never moves them.
+  // Keep effect overlays outside the page content that shakes.
   function overlayCanvas(z: string): HTMLCanvasElement {
     const c = document.createElement("canvas");
     c.setAttribute("aria-hidden", "true");
@@ -660,16 +665,33 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
     particles.push({ kind: "bolt", x, y, vx: 0, vy: 0, life: 260, maxLife: 260, size: rand(1.5, 2.5), hue, spin: 0, angle: 0, points });
   }
 
-  // ---- shake (composited: `translate` on an element promoted with will-change)
+  // ---- shake (editor translation, viewport-safe page offsets)
 
   function shakeElement(el: HTMLElement, amp: number) {
     const existing = shakes.get(el);
     if (existing) {
-      existing.amp = Math.min(existing.amp + amp, 22);
+      existing.amp = Math.min(Math.max(existing.amp, amp), 12);
       return;
     }
-    shakes.set(el, { prev: el.style.translate, prevWillChange: el.style.willChange, amp });
-    el.style.willChange = "translate";
+    const cs = window.getComputedStyle(el);
+    const state: ShakeState = {
+      prev: el.style.translate, prevWillChange: el.style.willChange,
+      baseTranslate: cs.translate, amp: Math.min(amp, 12),
+    };
+    if (el === document.body) {
+      // A transform (including will-change:translate) on body rebases every
+      // fixed sidebar, terminal and dialog. Relative offsets move page content
+      // without changing the containing block of fixed descendants.
+      state.prevPosition = el.style.position;
+      state.prevLeft = el.style.left;
+      state.prevTop = el.style.top;
+      state.baseLeft = cs.position === "static" ? 0 : parseFloat(cs.left) || 0;
+      state.baseTop = cs.position === "static" ? 0 : parseFloat(cs.top) || 0;
+      if (cs.position === "static") el.style.position = "relative";
+    } else {
+      el.style.willChange = "translate";
+    }
+    shakes.set(el, state);
   }
 
   function screenShake(amp: number) {
@@ -678,8 +700,14 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
   }
 
   function releaseShake(el: HTMLElement, s: ShakeState) {
-    el.style.translate = s.prev;
-    el.style.willChange = s.prevWillChange;
+    if (el === document.body) {
+      el.style.position = s.prevPosition ?? "";
+      el.style.left = s.prevLeft ?? "";
+      el.style.top = s.prevTop ?? "";
+    } else {
+      el.style.translate = s.prev;
+      el.style.willChange = s.prevWillChange;
+    }
     shakes.delete(el);
   }
 
@@ -977,7 +1005,8 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
         const tail = Array.from(node.data.slice(-Math.min(delta, 4))).filter((c) => c.trim());
         for (const ch of tail.slice(-2)) glyph(point.x, point.y, hue, ch, 0.9);
       }
-      if (settings.shake) shakeElement(row, 1.2 * tune.shake);
+      // Timeline rows are positioned and animated by the host. Moving a row
+      // interferes with virtualization and its entrance/layout animations.
     }
     touched.clear();
     if (totalDelta <= 0) return;
@@ -1036,153 +1065,18 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
   };
 
   // ---- text protection
-  //
-  // Goal: box background → effects → text. For the focused editor (and the
-  // streaming agent row) we find the nearest ancestor that paints a
-  // background, slip a small canvas inside it at z-index:-1 (the host gets
-  // `isolation:isolate` so that lands above its background but below its
-  // text), copy the overlapping part of the effects into it each frame, and
-  // erase that region from the top-level canvases. If no suitable host exists
-  // (the editor paints its own background, or the host is huge), fall back to
-  // fading the effects out over the text.
-
-  interface Underlay {
-    host: HTMLElement;
-    canvas: HTMLCanvasElement;
-    c: CanvasRenderingContext2D;
-    prevIsolation: string;
-    lastUsed: number;
-    left: number;
-    top: number;
-  }
-  const underlays = new Map<HTMLElement, Underlay>();
-  const hostCache = new WeakMap<HTMLElement, HTMLElement | null>();
-  const MAX_UNDERLAY_AREA = 0.35; // of the viewport
-
-  function paintsBackground(cs: CSSStyleDeclaration): boolean {
-    if (cs.backgroundImage && cs.backgroundImage !== "none") return true;
-    const bg = cs.backgroundColor;
-    if (!bg || bg === "transparent") return false;
-    const m = bg.match(/rgba?\(([^)]+)\)/);
-    if (!m) return true;
-    const parts = m[1].split(/[\s,/]+/).filter(Boolean);
-    return parts.length < 4 || parseFloat(parts[3]) > 0.05;
-  }
-
-  function backgroundHost(el: HTMLElement): HTMLElement | null {
-    if (hostCache.has(el)) return hostCache.get(el) ?? null;
-    let found: HTMLElement | null = null;
-    let node: HTMLElement | null = el;
-    for (let i = 0; node && node !== document.body && i < 10; i++, node = node.parentElement) {
-      if (!paintsBackground(window.getComputedStyle(node))) continue;
-      // Never inject into an editable element (it would corrupt the editor).
-      const editable = node.isContentEditable || node instanceof HTMLTextAreaElement || node instanceof HTMLInputElement;
-      found = editable ? null : node;
-      break;
-    }
-    hostCache.set(el, found);
-    return found;
-  }
-
-  function underlayFor(host: HTMLElement, now: number): Underlay | null {
-    let u = underlays.get(host);
-    if (!u) {
-      const canvasEl = document.createElement("canvas");
-      canvasEl.setAttribute("aria-hidden", "true");
-      canvasEl.dataset.powerModeUnderlay = "";
-      const c = canvasEl.getContext("2d");
-      if (!c) return null;
-      Object.assign(canvasEl.style, {
-        position: "fixed", left: "0px", top: "0px", zIndex: "-1", pointerEvents: "none",
-        borderRadius: window.getComputedStyle(host).borderRadius,
-      });
-      u = { host, canvas: canvasEl, c, prevIsolation: host.style.isolation, lastUsed: now, left: 0, top: 0 };
-      host.style.isolation = "isolate";
-      host.appendChild(canvasEl);
-      underlays.set(host, u);
-    }
-    u.lastUsed = now;
-    return u;
-  }
-
-  function removeUnderlay(u: Underlay) {
-    u.canvas.remove();
-    u.host.style.isolation = u.prevIsolation;
-    underlays.delete(u.host);
-  }
-
-  function removeAllUnderlays() {
-    for (const u of [...underlays.values()]) removeUnderlay(u);
-  }
+  // Fade only the overlay pixels. Inserting fixed canvases into host editor
+  // containers changes stacking and containing blocks during layout animations.
 
   function erase(c: CanvasRenderingContext2D, scale: number, r: DOMRect, strength: number, pad: number) {
     c.setTransform(scale, 0, 0, scale, 0, 0);
     c.globalCompositeOperation = "destination-out";
-    if (pad > 0) {
-      c.globalAlpha = strength * 0.5;
-      c.fillRect(r.left - pad, r.top - pad, r.width + pad * 2, r.height + pad * 2);
-    }
+    c.globalAlpha = strength * 0.5;
+    c.fillRect(r.left - pad, r.top - pad, r.width + pad * 2, r.height + pad * 2);
     c.globalAlpha = strength;
     c.fillRect(r.left, r.top, r.width, r.height);
     c.globalAlpha = 1;
     c.globalCompositeOperation = "source-over";
-  }
-
-  /** Move the effects over `r` into the host's underlay, below its text. */
-  function sinkInto(u: Underlay, r: DOMRect, useBloom: boolean) {
-    const w = Math.max(1, Math.ceil(r.width));
-    const h = Math.max(1, Math.ceil(r.height));
-    const cv = u.canvas;
-    if (cv.width !== w || cv.height !== h) {
-      cv.width = w;
-      cv.height = h;
-      cv.style.width = `${w}px`;
-      cv.style.height = `${h}px`;
-    }
-    // A transformed ancestor (e.g. a shaking element) turns `fixed` into
-    // "relative to that ancestor", so measure where the canvas really landed
-    // and correct by the difference.
-    const m = cv.getBoundingClientRect();
-    const dx = r.left - m.left;
-    const dy = r.top - m.top;
-    if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) {
-      u.left += dx;
-      u.top += dy;
-      cv.style.left = `${u.left}px`;
-      cv.style.top = `${u.top}px`;
-    }
-    const c = u.c;
-    c.setTransform(1, 0, 0, 1, 0, 0);
-    c.clearRect(0, 0, w, h);
-    if (useBloom) {
-      c.globalAlpha = parseFloat(bloom.style.opacity) || 0;
-      c.drawImage(bloom, r.left * BLOOM_SCALE, r.top * BLOOM_SCALE, r.width * BLOOM_SCALE, r.height * BLOOM_SCALE, 0, 0, w, h);
-    }
-    c.globalAlpha = 0.9; // a touch dimmer under text, for contrast
-    c.drawImage(canvas, r.left * DPR, r.top * DPR, r.width * DPR, r.height * DPR, 0, 0, w, h);
-    c.globalAlpha = 1;
-    if (ctx) erase(ctx, DPR, r, 1, 0);
-    if (useBloom && bctx) erase(bctx, BLOOM_SCALE, r, 1, 0);
-  }
-
-  function protectElement(el: HTMLElement, now: number, useBloom: boolean, fallbackStrength: number, band: DOMRect | null) {
-    const host = backgroundHost(el);
-    if (host && host.isConnected) {
-      const r = host.getBoundingClientRect();
-      const area = r.width * r.height;
-      if (area > 0 && area <= window.innerWidth * window.innerHeight * MAX_UNDERLAY_AREA) {
-        const u = underlayFor(host, now);
-        if (u) {
-          sinkInto(u, r, useBloom);
-          return;
-        }
-      }
-    }
-    // Fallback: fade the effects out over the text.
-    const r = band ?? el.getBoundingClientRect();
-    if (r.width === 0 || r.height === 0) return;
-    if (ctx) erase(ctx, DPR, r, fallbackStrength, 12);
-    if (useBloom && bctx) erase(bctx, BLOOM_SCALE, r, fallbackStrength, 12);
   }
 
   function focusedEditor(): HTMLElement | null {
@@ -1200,14 +1094,21 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
     return new DOMRect(r.left, top, r.width, Math.max(0, bottom - top));
   }
 
-  function protectTextZones(now: number, useBloom: boolean) {
+  function protectTextZones(useBloom: boolean) {
     const editor = focusedEditor();
-    if (editor) protectElement(editor, now, useBloom, 0.94, caretBand(editor));
-    // The streaming agent row is deliberately not protected: carving the
-    // effects out of (or sinking them behind) its box left a visible bar
-    // behind the text, so the effects simply render on top of it.
-    // Drop underlays nobody used this frame (editor blurred, agent finished).
-    for (const u of [...underlays.values()]) if (u.lastUsed !== now) removeUnderlay(u);
+    if (!editor) return;
+    const r = caretBand(editor) ?? editor.getBoundingClientRect();
+    if (r.width <= 0 || r.height <= 0) return;
+    if (ctx) erase(ctx, DPR, r, 0.94, 12);
+    if (useBloom && bctx) erase(bctx, BLOOM_SCALE, r, 0.94, 12);
+  }
+
+  function clearCanvases() {
+    for (const c of [ctx, bctx]) {
+      if (!c) continue;
+      c.setTransform(1, 0, 0, 1, 0, 0);
+      c.clearRect(0, 0, c.canvas.width, c.canvas.height);
+    }
   }
 
   // ---- render loop
@@ -1227,8 +1128,22 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
   }
 
   function frame(now: number) {
-    raf = 0;
-    if (disposed) return;
+    if (disposed) { raf = 0; return; }
+    // Keep raf set while rendering: combo records/achievements can synchronously
+    // change settings and call start(). They must not create a second loop.
+    try {
+      renderFrame(now);
+    } finally {
+      raf = 0;
+    }
+    if (particles.length > 0 || shakes.size > 0 || combo > 0 || agentWords > 0) {
+      raf = requestAnimationFrame(frame);
+    } else {
+      clearCanvases();
+    }
+  }
+
+  function renderFrame(now: number) {
     const dt = Math.min(now - lastFrame, 50);
     lastFrame = now;
     const step = dt / 16.67;
@@ -1256,7 +1171,15 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
         releaseShake(el, s);
         continue;
       }
-      el.style.translate = `${rand(-s.amp, s.amp).toFixed(1)}px ${rand(-s.amp, s.amp).toFixed(1)}px`;
+      const x = rand(-s.amp, s.amp).toFixed(1);
+      const y = rand(-s.amp, s.amp).toFixed(1);
+      if (el === document.body) {
+        el.style.left = `${s.baseLeft! + Number(x)}px`;
+        el.style.top = `${s.baseTop! + Number(y)}px`;
+      } else {
+        const [baseX = "0px", baseY = "0px", baseZ] = s.baseTranslate === "none" ? [] : s.baseTranslate.split(/\s+/);
+        el.style.translate = `calc(${baseX} + ${x}px) calc(${baseY} + ${y}px)${baseZ ? ` ${baseZ}` : ""}`;
+      }
       s.amp *= Math.pow(0.8, step);
     }
 
@@ -1455,16 +1378,7 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
       ctx.globalAlpha = 1;
     }
     if (bctx) bctx.globalAlpha = 1;
-    if (settings.protectText && particles.length > 0) protectTextZones(now, useBloom);
-    else if (underlays.size) removeAllUnderlays();
-
-    if (particles.length > 0 || shakes.size > 0 || combo > 0 || agentWords > 0) {
-      raf = requestAnimationFrame(frame);
-    } else {
-      ctx?.clearRect(0, 0, canvas.width, canvas.height);
-      bctx?.clearRect(0, 0, bloom.width, bloom.height);
-      removeAllUnderlays();
-    }
+    if (settings.protectText && particles.length > 0) protectTextZones(useBloom);
   }
 
   // ---- settings changes (toggle from the footer, settings page, other tabs)
@@ -1477,6 +1391,15 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
     theme = THEMES[next.theme];
     themeBucket = -1;
     applyThemeStatic();
+    // Discard stale bloom pixels before changing layer visibility. Redraw even
+    // when the engine was idle when a visual setting changed.
+    clearCanvases();
+    if (!next.shake || !next.screenShake) {
+      for (const [el, state] of shakes) {
+        if (el === document.body ? !next.screenShake : !next.shake) releaseShake(el, state);
+      }
+    }
+    if (next.enabled) start();
     updateObserver();
     if (next.enabled && (themeChanged || !was)) {
       const id = next.theme;
@@ -1500,7 +1423,7 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
       hud.classList.remove("pm-on");
       vignette.style.opacity = "0";
       restoreShakes();
-      removeAllUnderlays();
+      clearCanvases();
       particles = [];
       glyphCount = 0;
       slam("power mode off", "", 220, "quiet");
@@ -1538,7 +1461,7 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
     for (const id of timers) window.clearTimeout(id);
     timers.clear();
     restoreShakes();
-    removeAllUnderlays();
+    clearCanvases();
     for (const el of transient) el.remove();
     transient.clear();
     detach();
