@@ -1244,8 +1244,10 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
       else hudFill.style.transform = `scaleX(${left.toFixed(3)})`;
     } else if (agentWords > 0) {
       const left = 1 - (now - lastAgentAt) / AGENT_TIMEOUT_MS;
-      if (left <= 0 && !agentRunning) endAgentCombo();
-      else hudFill.style.transform = `scaleX(${Math.max(left, 0).toFixed(3)})`;
+      // End when the bar runs out even if the turn is still going (tool calls,
+      // thinking): otherwise the HUD sits there empty until the turn finishes.
+      if (left <= 0) endAgentCombo();
+      else hudFill.style.transform = `scaleX(${left.toFixed(3)})`;
     }
 
     // Shake: random offset that decays each frame
