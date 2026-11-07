@@ -124,6 +124,10 @@ const TEXT_INPUT_TYPES = new Set(["text", "search", "url", "email", "tel", ""]);
 
 function editableTarget(node: EventTarget | null): HTMLElement | null {
   if (!(node instanceof HTMLElement)) return null;
+  // xterm receives keystrokes through an invisible helper textarea, whose
+  // position and focus it manages itself. Treating it as an editor shakes
+  // that input and measures a fake caret instead of the visible terminal.
+  if (node.closest(".xterm")) return null;
   if (node instanceof HTMLTextAreaElement) return node;
   if (node instanceof HTMLInputElement) return TEXT_INPUT_TYPES.has(node.type) ? node : null;
   if (node.isContentEditable) {

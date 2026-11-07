@@ -13,3 +13,5 @@ Typing effects for bb, in the spirit of VS Code's Power Mode — turned up.
 - Optional synth sound
 
 Toggle with the ⚡ button in the sidebar footer or Mod+Alt+P. Tune it under Settings → Power Mode.
+
+Typing effects apply to text editors and fields. Terminal input is excluded so its hidden input and cursor positioning stay under the terminal's control.

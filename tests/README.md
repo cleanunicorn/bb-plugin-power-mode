@@ -20,3 +20,5 @@ all six themes clear their canvases after idling, visual settings and disable
 clear stale pixels immediately, streaming leaves virtualized rows in place, resizing during shake keeps panels
 anchored, and disposal restores host styles. The fixture
 includes a fixed terminal and sidebar and a translated timeline row.
+Terminal input (including Space, deletion, paste, and Enter) must retain its
+positioning and focus without emitting effects or changing scroll position.

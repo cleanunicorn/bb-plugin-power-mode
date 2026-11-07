@@ -60,6 +60,26 @@ const result = await page.evaluate(async () => {
     return count;
   });
   const baseline = fixedLayout();
+  const terminalInput = document.querySelector('.xterm-helper-textarea');
+  const terminalStyles = terminalInput.style.cssText;
+  const terminalScroll = [scrollX, scrollY, terminalInput.scrollLeft, terminalInput.scrollTop];
+  terminalInput.focus({ preventScroll: true });
+  for (const [data, inputType] of [
+    ['a', 'insertText'], [' ', 'insertText'], ['b', 'insertText'],
+    [null, 'deleteContentBackward'], ['paste', 'insertFromPaste'], ['\n', 'insertLineBreak'],
+  ]) {
+    terminalInput.value = data ?? '';
+    terminalInput.dispatchEvent(new InputEvent('input', { bubbles: true, data, inputType }));
+    advance();
+    assert(terminalInput.style.cssText === terminalStyles, 'Terminal input must keep its own positioning during typing and Space');
+    assert(fixedLayout() === baseline, 'Terminal typing must not move panels');
+    assert(document.body.style.position === '' && document.body.style.left === '' && document.body.style.top === '',
+      'Terminal typing must not trigger screen shake');
+    assert(pixels().every(n => n === 0), 'Hidden terminal input must not emit particles');
+  }
+  assert(JSON.stringify([scrollX, scrollY, terminalInput.scrollLeft, terminalInput.scrollTop]) === JSON.stringify(terminalScroll),
+    'Terminal typing must not change scroll position');
+  assert(document.activeElement === terminalInput, 'Terminal must retain input focus');
   editor.style.translate = '30px 20px';
   type('a');
   advance();
@@ -137,7 +157,7 @@ const result = await page.evaluate(async () => {
   PowerTest.setAgentRunning(false);
   PowerTest.updatePowerSettings({ screenShake: true });
   type('resize', 'insertFromPaste'); advance();
-  return { fixedPanelsStable: true, editorTranslationPreserved: true, themesChecked: 6,
+  return { terminalInputStable: true, fixedPanelsStable: true, editorTranslationPreserved: true, themesChecked: 6,
     agentRowStable: true, idleCanvasesClear: true, disableClearsImmediately: true,
     caretFadeSoftAndLocalized: true };
 });
