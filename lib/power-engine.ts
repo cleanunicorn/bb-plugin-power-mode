@@ -513,6 +513,9 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
   let agentWords = 0;
   let lastAgentAt = 0;
   let agentMilestone = 0;
+  // Whether the agent HUD is on screen. Separate from `agentWords` so the HUD
+  // can fade after a pause while the turn's running count carries on.
+  let agentHudOn = false;
 
   // Text protection: the editor being typed in.
   let activeEditor: HTMLElement | null = null;
@@ -767,7 +770,7 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
   }
 
   function hideHudIfIdle() {
-    if (combo === 0 && agentWords === 0) {
+    if (combo === 0 && !agentHudOn) {
       hud.classList.remove("pm-on");
       vignette.style.opacity = "0";
       wpmText = setText(hudWpm, "", wpmText);
@@ -996,7 +999,10 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
       if (settings.lightning && next.at >= 300) bolt(window.innerWidth / 2, window.innerHeight * 0.3, hue);
       if (settings.sound) synth.fanfare();
     }
-    if (combo === 0) showHud("AGENT", agentWords, "WORDS", theme.hue(agentWords, now));
+    if (combo === 0) {
+      agentHudOn = true;
+      showHud("AGENT", agentWords, "WORDS", theme.hue(agentWords, now));
+    }
     start();
   }
 
@@ -1011,6 +1017,7 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
   function endAgentCombo() {
     agentWords = 0;
     agentMilestone = 0;
+    agentHudOn = false;
     hideHudIfIdle();
   }
 
@@ -1031,6 +1038,11 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
         if (settings.sound) synth.fanfare();
         start();
       }
+      // Drop any flush still pending for this turn so late DOM updates can't
+      // bring the HUD back after the combo has ended.
+      window.clearTimeout(agentFlushTimer);
+      agentFlushTimer = 0;
+      touched.clear();
       endAgentCombo();
     },
   };
@@ -1242,12 +1254,15 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
       const left = 1 - (now - lastKeyAt) / COMBO_TIMEOUT_MS;
       if (left <= 0) endCombo();
       else hudFill.style.transform = `scaleX(${left.toFixed(3)})`;
-    } else if (agentWords > 0) {
+    } else if (agentHudOn) {
       const left = 1 - (now - lastAgentAt) / AGENT_TIMEOUT_MS;
-      // End when the bar runs out even if the turn is still going (tool calls,
-      // thinking): otherwise the HUD sits there empty until the turn finishes.
-      if (left <= 0) endAgentCombo();
-      else hudFill.style.transform = `scaleX(${left.toFixed(3)})`;
+      // Hide the HUD when the bar runs out, but keep counting words for the
+      // rest of the turn: resumed text picks up where it left off instead of
+      // restarting from 0. The turn ending resets the count.
+      if (left <= 0) {
+        agentHudOn = false;
+        hideHudIfIdle();
+      } else hudFill.style.transform = `scaleX(${left.toFixed(3)})`;
     }
 
     // Shake: random offset that decays each frame
@@ -1458,7 +1473,7 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
     if (settings.protectText && particles.length > 0) protectTextZones(now, useBloom);
     else if (underlays.size) removeAllUnderlays();
 
-    if (particles.length > 0 || shakes.size > 0 || combo > 0 || agentWords > 0) {
+    if (particles.length > 0 || shakes.size > 0 || combo > 0 || agentHudOn) {
       raf = requestAnimationFrame(frame);
     } else {
       ctx?.clearRect(0, 0, canvas.width, canvas.height);
@@ -1497,6 +1512,7 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
       combo = 0;
       agentWords = 0;
       agentMilestone = 0;
+      agentHudOn = false;
       hud.classList.remove("pm-on");
       vignette.style.opacity = "0";
       restoreShakes();
