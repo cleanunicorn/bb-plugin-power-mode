@@ -46,8 +46,11 @@ const result = await page.evaluate(async () => {
   const type = (text, inputType = 'insertText') => {
     editor.focus();
     editor.textContent += text;
-    selection.selectAllChildren(editor);
-    selection.collapseToEnd();
+    const range = document.createRange();
+    range.setStart(editor.lastChild, editor.lastChild.textContent.length);
+    range.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(range);
     editor.dispatchEvent(new InputEvent('input', { bubbles: true, data: text, inputType }));
   };
   const pixels = () => [...document.querySelectorAll('html > canvas')].map(canvas => {
@@ -74,6 +77,40 @@ const result = await page.evaluate(async () => {
   assert(editor.style.translate === '30px 20px', 'Shake setting must restore the editor immediately');
   assert(document.body.style.position === '' && document.body.style.left === '' && document.body.style.top === '',
     'Shake setting must restore body styles immediately');
+  // Paint a uniform overlay for one frame so mask coverage can be measured
+  // independently of random particle positions, on both particle and bloom canvases.
+  editor.textContent = '';
+  type('mask');
+  const caretRange = selection.getRangeAt(0).cloneRange();
+  caretRange.collapse(false);
+  const caret = caretRange.getBoundingClientRect();
+  const contexts = [...document.querySelectorAll('html > canvas')].map(canvas => canvas.getContext('2d'));
+  const clears = contexts.map(context => context.clearRect);
+  contexts.forEach(context => {
+    context.clearRect = function (...args) {
+      CanvasRenderingContext2D.prototype.clearRect.apply(this, args);
+      this.save();
+      this.setTransform(1, 0, 0, 1, 0, 0);
+      this.globalAlpha = 1;
+      this.globalCompositeOperation = 'source-over';
+      this.fillStyle = '#fff';
+      this.fillRect(0, 0, this.canvas.width, this.canvas.height);
+      this.restore();
+    };
+  });
+  advance();
+  contexts.forEach((context, index) => {
+    context.clearRect = clears[index];
+    const scale = context.canvas.width / innerWidth;
+    const alpha = (x, y) => context.getImageData(Math.floor(x * scale), Math.floor(y * scale), 1, 1).data[3];
+    const x = caret.right, y = caret.top + caret.height / 2;
+    const center = alpha(x, y), edge = alpha(x + 48, y);
+    assert(center > 40 && center < 130, `Text protection must gently fade near the caret (canvas ${index}, alpha ${center}, caret ${x},${y}, size ${innerWidth},${innerHeight})`);
+    assert(edge > center && edge < 255, 'Caret fade must have a soft edge');
+    assert(alpha(x + 100, y) === 255 && alpha(x, y + 50) === 255,
+      'Text protection must preserve effects elsewhere in the editor');
+  });
+  advance();
   for (const theme of ['neon', 'fire', 'matrix', 'sakura', 'cyberpunk', 'retro']) {
     PowerTest.updatePowerSettings({ theme, glow: 0.7 });
     type('theme'); advance(5);
@@ -101,8 +138,10 @@ const result = await page.evaluate(async () => {
   PowerTest.updatePowerSettings({ screenShake: true });
   type('resize', 'insertFromPaste'); advance();
   return { fixedPanelsStable: true, editorTranslationPreserved: true, themesChecked: 6,
-    agentRowStable: true, idleCanvasesClear: true, disableClearsImmediately: true };
+    agentRowStable: true, idleCanvasesClear: true, disableClearsImmediately: true,
+    caretFadeSoftAndLocalized: true };
 });
+await screenshot({ kind: 'proof' });
 await page.setViewportSize({ width: 1280, height: 800 });
 await page.evaluate(() => {
   window.dispatchEvent(new Event('resize'));
@@ -125,5 +164,4 @@ await page.evaluate(() => {
 
 });
 await snapshot({ diff: true });
-await screenshot({ kind: 'proof' });
 return { ...result, resizeStable: true, disposalRestoresStyles: true };

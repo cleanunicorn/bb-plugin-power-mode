@@ -66,7 +66,7 @@ const INTENSITY_OPTIONS: { id: Intensity; label: string; hint: string }[] = [
 ];
 
 const EFFECT_OPTIONS: { key: keyof PowerSettings; label: string; hint: string }[] = [
-  { key: "protectText", label: "Keep text clear", hint: "Effects fade out over the text box you are typing in and the agent reply being written, so the text stays readable." },
+  { key: "protectText", label: "Keep text clear", hint: "Effects gently fade near the caret while you type, so the text stays readable." },
   { key: "shake", label: "Editor shake", hint: "The text box jumps on every keystroke." },
   { key: "screenShake", label: "Screen shake", hint: "The whole window quakes on combos and Enter." },
   { key: "ghostLetters", label: "Flying letters", hint: "Each typed character launches off the caret." },

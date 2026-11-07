@@ -521,6 +521,7 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
 
   // Text protection: the editor being typed in.
   let activeEditor: HTMLElement | null = null;
+  let lastCaretX = 0;
   let lastCaretY = 0;
 
   // Adaptive quality: if frames get slow, spawn fewer particles until they recover.
@@ -891,6 +892,7 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
     const heat = Math.min(combo / 100, 1); // 0 → 1 as the combo builds
     const { x, y } = caret;
     activeEditor = target;
+    lastCaretX = x;
     lastCaretY = y;
 
     if (deleting) {
@@ -1068,15 +1070,20 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
   // Fade only the overlay pixels. Inserting fixed canvases into host editor
   // containers changes stacking and containing blocks during layout animations.
 
-  function erase(c: CanvasRenderingContext2D, scale: number, r: DOMRect, strength: number, pad: number) {
-    c.setTransform(scale, 0, 0, scale, 0, 0);
+  function fadeCaret(c: CanvasRenderingContext2D, scale: number, x: number, y: number) {
+    // A soft ellipse keeps the current text readable without cutting an
+    // editor-sized rectangle out of particles and bloom.
+    c.save();
+    c.setTransform(scale * 72, 0, 0, scale * 24, scale * x, scale * y);
+    const fade = c.createRadialGradient(0, 0, 0, 0, 0, 1);
+    fade.addColorStop(0, "rgba(0,0,0,.7)");
+    fade.addColorStop(0.4, "rgba(0,0,0,.5)");
+    fade.addColorStop(1, "rgba(0,0,0,0)");
     c.globalCompositeOperation = "destination-out";
-    c.globalAlpha = strength * 0.5;
-    c.fillRect(r.left - pad, r.top - pad, r.width + pad * 2, r.height + pad * 2);
-    c.globalAlpha = strength;
-    c.fillRect(r.left, r.top, r.width, r.height);
     c.globalAlpha = 1;
-    c.globalCompositeOperation = "source-over";
+    c.fillStyle = fade;
+    c.fillRect(-1, -1, 2, 2);
+    c.restore();
   }
 
   function focusedEditor(): HTMLElement | null {
@@ -1086,21 +1093,15 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
     return focused && (el === focused || el.contains(focused)) ? el : null;
   }
 
-  function caretBand(el: HTMLElement): DOMRect | null {
-    const r = el.getBoundingClientRect();
-    if (r.height <= window.innerHeight * 0.4) return null;
-    const top = Math.max(r.top, lastCaretY - 36);
-    const bottom = Math.min(r.bottom, lastCaretY + 36);
-    return new DOMRect(r.left, top, r.width, Math.max(0, bottom - top));
-  }
-
   function protectTextZones(useBloom: boolean) {
     const editor = focusedEditor();
     if (!editor) return;
-    const r = caretBand(editor) ?? editor.getBoundingClientRect();
+    const r = editor.getBoundingClientRect();
     if (r.width <= 0 || r.height <= 0) return;
-    if (ctx) erase(ctx, DPR, r, 0.94, 12);
-    if (useBloom && bctx) erase(bctx, BLOOM_SCALE, r, 0.94, 12);
+    const x = Math.min(Math.max(lastCaretX, r.left), r.right);
+    const y = Math.min(Math.max(lastCaretY, r.top), r.bottom);
+    if (ctx) fadeCaret(ctx, DPR, x, y);
+    if (useBloom && bctx) fadeCaret(bctx, BLOOM_SCALE, x, y);
   }
 
   function clearCanvases() {
