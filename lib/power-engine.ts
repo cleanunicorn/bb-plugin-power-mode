@@ -514,10 +514,9 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
   let lastAgentAt = 0;
   let agentMilestone = 0;
 
-  // Text protection: the editor being typed in and the agent row streaming text.
+  // Text protection: the editor being typed in.
   let activeEditor: HTMLElement | null = null;
   let lastCaretY = 0;
-  let agentRow: HTMLElement | null = null;
 
   // Adaptive quality: if frames get slow, spawn fewer particles until they recover.
   let quality = 1;
@@ -979,7 +978,6 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
         for (const ch of tail.slice(-2)) glyph(point.x, point.y, hue, ch, 0.9);
       }
       if (settings.shake) shakeElement(row, 1.2 * tune.shake);
-      agentRow = row;
     }
     touched.clear();
     if (totalDelta <= 0) return;
@@ -1205,13 +1203,9 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
   function protectTextZones(now: number, useBloom: boolean) {
     const editor = focusedEditor();
     if (editor) protectElement(editor, now, useBloom, 0.94, caretBand(editor));
-    const row = agentRow;
-    if (row && row.isConnected && now - lastAgentAt < 1500) {
-      const r = row.getBoundingClientRect();
-      const top = Math.max(0, r.top);
-      const bottom = Math.min(window.innerHeight, r.bottom);
-      if (bottom > top) protectElement(row, now, useBloom, 0.7, new DOMRect(r.left, top, r.width, bottom - top));
-    }
+    // The streaming agent row is deliberately not protected: carving the
+    // effects out of (or sinking them behind) its box left a visible bar
+    // behind the text, so the effects simply render on top of it.
     // Drop underlays nobody used this frame (editor blurred, agent finished).
     for (const u of [...underlays.values()]) if (u.lastUsed !== now) removeUnderlay(u);
   }
