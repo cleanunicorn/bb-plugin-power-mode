@@ -39,3 +39,10 @@ Pasting (or dropping) text drops weapons near the caret. Bigger pastes drop bigg
 - Impacts land at least 60 px from the caret. Intensity scales the explosions and shake; `lightning`, `screen shake`, `sound` and text protection apply as usual.
 - Combo records and achievements count at most +10 per paste, so a single huge paste can't unlock them.
 - Editors that cancel the native paste and insert the text themselves (ProseMirror-style) are detected from the `paste` event.
+
+## Data & limitations
+
+- **Where data lives:** settings and lifetime stats/achievements are stored in the browser's `localStorage` for the bb origin, under keys namespaced by the plugin id (`<plugin id>:power-mode:settings` and `<plugin id>:power-mode:stats`). Nothing is sent to a server, and an agent cannot change them.
+- **Same browser profile:** every bb window and tab in one browser profile reads the same storage. Settings changes reach the other open windows right away (through the `storage` event).
+- **Different profiles, browsers or devices** do not share storage. Opening bb in a new browser profile, a private window, another browser or another device starts from default settings and empty stats, and clearing the site's data erases them.
+- **Multiple windows and stats:** stats are not synchronized yet. Each window loads stats once and saves its own in-memory copy about every 2 seconds, so with several windows open one window can overwrite progress (or undo a stats reset) made in another. Tracked in [#10](https://github.com/cleanunicorn/bb-plugin-power-mode/issues/10).

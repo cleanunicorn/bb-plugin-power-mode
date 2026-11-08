@@ -14,8 +14,11 @@ Power Mode is a frontend-only plugin. It has no CLI commands or agent tools.
   editor/screen shake, flying letters, lightning, Agent Power Mode, sound, plus
   lifetime stats and achievements.
 - **Agent Power Mode** watches the transcript only while some thread is running.
-- State lives in each browser window's localStorage, so it is per device and syncs
-  across tabs in the same browser. An agent cannot toggle it.
+- Settings and stats live in the browser's localStorage for the bb origin, keyed by
+  the plugin id. All windows in one browser profile share them (settings changes sync
+  live); other profiles, browsers and devices do not. Stats are not yet synchronized
+  between open windows, so one window can overwrite another's progress (issue #10).
+  An agent cannot toggle it.
 - It reacts to `input` events in text fields, textareas, and contenteditable editors;
   password fields are ignored.
 - **Paste ordnance:** pasting text drops theme-skinned weapons near the caret, scaled
