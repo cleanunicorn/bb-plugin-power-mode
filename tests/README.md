@@ -120,7 +120,7 @@ models trusted IME events to verify commit-once behavior; native IME is not driv
 by the guarded browser API. The browser suite verifies that unknown-timing
 `keyboard.insertText` does not silently become manual typing.
 
-Build the gallery/native-input fixture alongside the engine fixture above:
+`npm run build:test` (and so `npm run test:browser`) already builds this fixture into `dist/test-site`. To build it by hand alongside the engine fixture above:
 
 ```sh
 npm exec --yes --package=esbuild -- esbuild tests/achievements-entry.tsx --bundle --format=iife --global-name=AchievementTest --alias:sonner=./tests/toast-stub.ts --alias:@get-bb/plugin-sdk/app=./tests/achievement-sdk-stub.ts --outfile=/tmp/power-regression/achievements.js
