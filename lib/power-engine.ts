@@ -2312,6 +2312,14 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
     // change settings and call start(). They must not create a second loop.
     try {
       renderFrame(now);
+    } catch (error) {
+      // A throwing frame used to end the loop with its last frame (and bloom)
+      // frozen on the fixed canvases. Drop the animation state that may be
+      // half-updated, wipe the layers and let the loop idle or continue.
+      console.error("[power-mode] render frame failed", error);
+      particles = [];
+      glyphCount = 0;
+      clearCanvases();
     } finally {
       raf = 0;
     }

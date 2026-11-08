@@ -33,3 +33,12 @@ afterwards, skins kept across a mid-flight theme switch, the timer, pending and
 particle caps under ten rapid 300k pastes, the singularity pull, `lightning`,
 `screenShake` and `sound` off, and disabling and re-enabling during an event. It
 uses the `setOrdnanceRandom` and `ordnanceDebug` test seams.
+
+`thread-switch.browser.js` covers lingering effects after thread navigation (#17):
+twelve timeline swaps with streaming text while the agent starts and stops leave
+no canvas, bloom, vignette or HUD residue once activity ends; a render frame that
+throws mid-draw (injected through `drawImage`) clears both canvases instead of
+freezing its last frame; and an animation started right after a swap still draws.
+Findings: thread switching alone did not reproduce on current main (#5's idle
+clear covers it, but its tests never swap rows). The reproduced cause is the
+throwing frame, which ended the loop without clearing, fixed in `frame()`.
