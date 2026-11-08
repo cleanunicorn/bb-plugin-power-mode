@@ -1741,12 +1741,25 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
 
   const rowTexts = new WeakMap<Element, string>();
   const wordCount = (text: string) => (text.match(/\S+/gu) ?? []).length;
-  // BB keeps clamped timeline content in the DOM and adds or removes these
-  // controls when its presentation changes. They are not agent output.
+  // BB's command approval preview renders only the first four lines while
+  // collapsed. Count that stable prefix in either state; its remaining lines
+  // are not available in the DOM when collapsed.
   function agentRowText(row: Element): string {
     const walker = document.createTreeWalker(row, NodeFilter.SHOW_TEXT);
     let text = "";
+    const seenPreviews = new Set<Element>();
     for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const preview = node.parentElement?.closest('[data-testid="command-preview"]');
+      const child = preview && node.parentElement?.closest("pre, button");
+      if (preview && child?.parentElement === preview) {
+        if (child.matches("pre") && !seenPreviews.has(child)) {
+          seenPreviews.add(child);
+          text += (child.textContent ?? "").split("\n").slice(0, 4).join("\n");
+        }
+        continue;
+      }
+      // Other timeline controls use CSS clamping, so their full content is
+      // already present and only the control label needs to be excluded.
       const control = node.parentElement?.closest('button[aria-expanded]');
       if (control && row.contains(control) && /^(Show more|Show less)$/.test(control.textContent?.trim() ?? "")) continue;
       text += node.textContent ?? "";

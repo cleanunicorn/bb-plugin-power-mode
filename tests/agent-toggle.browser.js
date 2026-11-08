@@ -26,9 +26,11 @@ return await page.evaluate(async () => {
   content.textContent = 'Existing full text remains in the DOM while clamped';
   row.append(content);
   let expanded = false;
+  let controlWrapper;
   const renderControl = () => {
-    row.querySelector('button')?.parentElement.remove();
+    controlWrapper?.remove();
     const wrapper = document.createElement(expanded ? 'div' : 'span');
+    controlWrapper = wrapper;
     const button = document.createElement('button');
     button.setAttribute('aria-expanded', String(expanded));
     button.textContent = expanded ? 'Show less' : 'Show more';
@@ -36,6 +38,28 @@ return await page.evaluate(async () => {
     wrapper.append(button); row.append(wrapper);
   };
   renderControl();
+  // BB's approval preview actually replaces the pre's text, unlike CSS clamp.
+  const preview = document.createElement('div');
+  preview.dataset.testid = 'command-preview';
+  const pre = document.createElement('pre');
+  const command = Array.from({ length: 12 }, (_, i) => `line${i} existing words`);
+  const commandButton = document.createElement('button');
+  let commandExpanded = false;
+  const renderCommand = () => {
+    pre.textContent = '$ ' + (commandExpanded ? command : command.slice(0, 4)).join('\n');
+    commandButton.textContent = commandExpanded ? 'Show less' : 'Show 8 more lines';
+  };
+  commandButton.onclick = () => { commandExpanded = !commandExpanded; renderCommand(); };
+  preview.append(pre, commandButton); row.append(preview); renderCommand();
+  const otherRow = document.createElement('div');
+  otherRow.dataset.timelineRowId = 'other';
+  otherRow.textContent = 'Other row';
+  row.parentElement.append(otherRow);
+  const otherText = otherRow.firstChild;
+  const otherButton = document.createElement('button');
+  otherButton.textContent = 'Run';
+  otherButton.onclick = () => { otherText.data += ' ordinary update'; };
+  otherRow.append(otherButton);
   const slams = [];
   const append = document.documentElement.appendChild.bind(document.documentElement);
   document.documentElement.appendChild = el => { if (el.classList?.contains('pm-slam')) slams.push(el.textContent); return append(el); };
@@ -47,7 +71,7 @@ return await page.evaluate(async () => {
   advance(30);
   const count = () => Number(document.querySelector('.pm-hud-count').textContent);
   const chars = () => PowerTest.getPowerStats().agentChars;
-  const toggle = () => row.querySelector('button').click();
+  const toggle = () => controlWrapper.querySelector('button').click();
   const stream = words => { content.textContent += ' ' + words; };
   stream('one two three'); await tick();
   assert(count() === 3, `Initial streaming counted: ${count()}`);
@@ -63,7 +87,20 @@ return await page.evaluate(async () => {
   assert(count() === 8, `Output interleaved with expansion counts: ${count()}`);
   toggle(); stream('nine'); await tick();
   assert(count() === 9, 'Output interleaved with collapse counts');
+  const previewChars = chars(), previewSlams = slams.length;
+  commandButton.click(); await tick();
+  assert(count() === 9 && chars() === previewChars && slams.length === previewSlams, 'Command expansion does not count revealed lines');
+  commandButton.click(); await tick();
+  assert(count() === 9 && chars() === previewChars && slams.length === previewSlams, 'Command collapse does not subtract hidden lines');
+  stream('ten'); commandButton.click(); stream('eleven'); await tick();
+  assert(count() === 11, 'Streaming interleaved with command expansion counts');
+  stream('twelve'); commandButton.click(); stream('thirteen'); await tick();
+  assert(count() === 13, 'Streaming interleaved with command collapse counts');
+  command[0] += ' fourteen'; renderCommand(); await tick();
+  assert(count() === 14, 'Changes to the visible command prefix still count');
+  commandButton.click(); otherButton.click(); await tick();
+  assert(count() === 16, 'Other rows and unrelated controls still count output during a toggle');
   PowerTest.syncAgentThreads(thread(false), 'a'); await tick();
-  assert(PowerTest.getPowerStats().bestAgentWords === 9, 'Turn statistics contain only streamed words');
+  assert(PowerTest.getPowerStats().bestAgentWords === 16, 'Turn statistics contain only streamed words');
   return { ok: true };
 });
