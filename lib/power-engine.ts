@@ -1741,6 +1741,18 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
 
   const rowTexts = new WeakMap<Element, string>();
   const wordCount = (text: string) => (text.match(/\S+/gu) ?? []).length;
+  // BB keeps clamped timeline content in the DOM and adds or removes these
+  // controls when its presentation changes. They are not agent output.
+  function agentRowText(row: Element): string {
+    const walker = document.createTreeWalker(row, NodeFilter.SHOW_TEXT);
+    let text = "";
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const control = node.parentElement?.closest('button[aria-expanded]');
+      if (control && row.contains(control) && /^(Show more|Show less)$/.test(control.textContent?.trim() ?? "")) continue;
+      text += node.textContent ?? "";
+    }
+    return text;
+  }
   const touched = new Map<HTMLElement, Node>();
   let agentFlushTimer = 0;
   let observing = false;
@@ -1805,14 +1817,14 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
       if (!turn) agentTurns.set(creditId, (turn = { words: 0, milestone: 0, partial: true }));
     }
     if (!turn) {
-      for (const row of touched.keys()) rowTexts.set(row, row.textContent ?? "");
+      for (const row of touched.keys()) rowTexts.set(row, agentRowText(row));
       touched.clear();
       return;
     }
     let totalDelta = 0;
     let wordDelta = 0;
     for (const [row, node] of touched) {
-      const text = row.textContent ?? "";
+      const text = agentRowText(row);
       const previous = rowTexts.get(row) ?? "";
       rowTexts.set(row, text);
       const delta = text.length - previous.length;
@@ -1867,7 +1879,7 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
     observing = want;
     if (want) {
       document.querySelectorAll("[data-timeline-items] [data-timeline-row-id]").forEach((row) => {
-        rowTexts.set(row, row.textContent ?? "");
+        rowTexts.set(row, agentRowText(row));
       });
       observer.observe(document.body, { subtree: true, childList: true, characterData: true });
     } else {

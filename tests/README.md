@@ -50,3 +50,6 @@ the visible thread, concurrent turns keep separate counts, a visible-thread chan
 in the same update as a finish credits buffered rows to the old thread, an unknown
 route credits only a sole running thread, and threads that vanish start over. Run
 it with the other browser tests (`betterwright run --no-daemon tests/agent-attribution.browser.js`).
+
+`agent-toggle.browser.js` covers the timeline's clamped content and expansion
+controls (#24), including streaming interleaved with expansion and collapse.
