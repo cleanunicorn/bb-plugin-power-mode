@@ -50,3 +50,12 @@ the visible thread, concurrent turns keep separate counts, a visible-thread chan
 in the same update as a finish credits buffered rows to the old thread, an unknown
 route credits only a sole running thread, and threads that vanish start over. Run
 it with the other browser tests (`betterwright run --no-daemon tests/agent-attribution.browser.js`).
+
+`reduced-motion.browser.js` covers reduced motion (#13) with a controllable
+`matchMedia` stub: the OS value is followed until an explicit override is saved,
+overrides (true and false) win over OS changes and persist, legacy or untrusted
+saved values parse to "follow the OS", tier 7–9 pastes, combo milestones, typing
+and power-on produce no body/editor shake and no `.pm-flash`, an OS flip
+mid-event releases live shakes and flashes, normal effects return when reduction
+is off, and disposal removes the listener. Lightning is gated in `bolt()` but not
+asserted directly.

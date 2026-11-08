@@ -5,6 +5,7 @@ Typing effects for bb, in the spirit of VS Code's Power Mode — turned up.
 - Particle bursts from the caret, with a soft bloom glow (quarter-resolution, cheap)
 - **Themes:** 🌈 Neon, 🔥 Inferno, 🟩 Matrix (falling code), 🌸 Sakura (drifting petals), 🌃 Cyberpunk, 👾 Retro 8-bit
 - **Particles** and **Glow** sliders; particle counts also drop automatically when frames get slow
+- **Reduce motion** (Settings): follows the OS `prefers-reduced-motion` setting until you choose; your explicit choice then sticks across OS changes and reloads. When active there is no editor/screen shake, no full-screen flash (including the white-out on tier 7–9 pastes and combo slams) and no lightning. Particles, slam text, the vignette pulse and bloom are unchanged.
 - Editor shake on every keystroke; screen shake on Enter, paste, and combo milestones
 - Combo counter with WPM gauge, draining timer, tier titles, and milestone slams with explosions and lightning
 - Flying letters, red shards on Backspace, shockwave on Enter
