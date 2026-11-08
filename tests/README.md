@@ -55,6 +55,14 @@ it with the other browser tests (`betterwright run --no-daemon tests/agent-attri
 preview expansion controls (#24), including streaming interleaved with expansion
 and collapse, another row, and an unrelated control.
 
+`night-owl.browser.js` covers Night Owl (#11) with a controllable local clock
+(`Date.now()` and `new Date()` stay consistent): typing unlocks it from 00:00
+inclusive to 04:00 exclusive (00:00:00.000, 03:59:59.999 yes; 04:00:00.000,
+23:59:59.999 no); daytime typing followed only by nighttime agent activity,
+theme changes or other stats mutations does not unlock it; a nighttime deletion
+or paste does not count as typing; and an existing unlock is preserved. Run it
+with the other browser tests (`betterwright run --no-daemon tests/night-owl.browser.js`).
+
 ## Achievement collection (#32)
 
 Node 24+ runs the pure reducer and adapter contract suites without a test runtime:

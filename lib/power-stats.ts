@@ -53,8 +53,24 @@ export interface Achievement {
   hidden: boolean;
   flavor?: string;
   requires: readonly string[];
-  check(stats: PowerStats, ctx: { hour: number }): boolean;
+  check(stats: PowerStats, ctx: AchievementContext): boolean;
 }
+
+/** What triggered an achievement check, beyond the stats themselves. */
+export interface AchievementContext {
+  /** Local hour of day (0-23) when the check runs. */
+  hour: number;
+  /** True only when this check follows a keystroke that added typed characters. */
+  typed: boolean;
+}
+
+/** Describes the event behind a `recordStats` call. */
+export interface StatsEvent {
+  typed?: boolean;
+}
+
+/** Night Owl window: 00:00 inclusive to 04:00 exclusive, local time. */
+export const NIGHT_OWL_END_HOUR = 4;
 
 const LEGACY: Omit<Achievement, "category" | "hidden" | "requires">[] = [
   {
@@ -160,7 +176,7 @@ const LEGACY: Omit<Achievement, "category" | "hidden" | "requires">[] = [
     icon: "🦉",
     title: "Night Owl",
     description: "Type between midnight and 4 AM.",
-    check: (s, c) => s.chars > 0 && c.hour < 4,
+    check: (_s, c) => c.typed && c.hour >= 0 && c.hour < NIGHT_OWL_END_HOUR,
   },
   {
     id: "agent-hype",
@@ -356,8 +372,8 @@ function scheduleSave() {
   if (!saveTimer) saveTimer = window.setTimeout(flush, 2000);
 }
 
-function checkAchievements() {
-  const ctx = { hour: new Date().getHours() };
+function checkAchievements(event: StatsEvent) {
+  const ctx: AchievementContext = { hour: new Date().getHours(), typed: event.typed === true };
   let unlockedAny = false;
   for (const a of ACHIEVEMENTS) {
     if (stats.unlocked[a.id] || !a.check(stats, ctx)) continue;
@@ -372,12 +388,16 @@ function checkAchievements() {
   }
 }
 
-/** Apply a change to the stats, then check for newly unlocked achievements. */
-export function recordStats(mutate: (s: PowerStats) => PowerStats) {
+/**
+ * Apply a change to the stats, then check for newly unlocked achievements.
+ * `event` says what caused the change; event-bound achievements (Night Owl)
+ * only unlock when their event is present.
+ */
+export function recordStats(mutate: (s: PowerStats) => PowerStats, event: StatsEvent = {}) {
   ensureLoaded();
   stats = mutate(stats);
   scheduleSave();
-  checkAchievements();
+  checkAchievements(event);
 }
 
 export function getPowerStats(): PowerStats {
