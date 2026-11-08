@@ -51,6 +51,10 @@ in the same update as a finish credits buffered rows to the old thread, an unkno
 route credits only a sole running thread, and threads that vanish start over. Run
 it with the other browser tests (`betterwright run --no-daemon tests/agent-attribution.browser.js`).
 
+`agent-toggle.browser.js` covers the timeline's clamped content and command
+preview expansion controls (#24), including streaming interleaved with expansion
+and collapse, another row, and an unrelated control.
+
 ## Achievement collection (#32)
 
 Node 24+ runs the pure reducer and adapter contract suites without a test runtime:

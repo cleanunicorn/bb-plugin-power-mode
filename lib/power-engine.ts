@@ -1755,6 +1755,31 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
 
   const rowTexts = new WeakMap<Element, string>();
   const wordCount = (text: string) => (text.match(/\S+/gu) ?? []).length;
+  // BB's command approval preview renders only the first four lines while
+  // collapsed. Count that stable prefix in either state; its remaining lines
+  // are not available in the DOM when collapsed.
+  function agentRowText(row: Element): string {
+    const walker = document.createTreeWalker(row, NodeFilter.SHOW_TEXT);
+    let text = "";
+    const seenPreviews = new Set<Element>();
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const preview = node.parentElement?.closest('[data-testid="command-preview"]');
+      const child = preview && node.parentElement?.closest("pre, button");
+      if (preview && child?.parentElement === preview) {
+        if (child.matches("pre") && !seenPreviews.has(child)) {
+          seenPreviews.add(child);
+          text += (child.textContent ?? "").split("\n").slice(0, 4).join("\n");
+        }
+        continue;
+      }
+      // Other timeline controls use CSS clamping, so their full content is
+      // already present and only the control label needs to be excluded.
+      const control = node.parentElement?.closest('button[aria-expanded]');
+      if (control && row.contains(control) && /^(Show more|Show less)$/.test(control.textContent?.trim() ?? "")) continue;
+      text += node.textContent ?? "";
+    }
+    return text;
+  }
   const touched = new Map<HTMLElement, Node>();
   let agentFlushTimer = 0;
   let observing = false;
@@ -1819,14 +1844,14 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
       if (!turn) agentTurns.set(creditId, (turn = { words: 0, milestone: 0, partial: true }));
     }
     if (!turn) {
-      for (const row of touched.keys()) rowTexts.set(row, row.textContent ?? "");
+      for (const row of touched.keys()) rowTexts.set(row, agentRowText(row));
       touched.clear();
       return;
     }
     let totalDelta = 0;
     let wordDelta = 0;
     for (const [row, node] of touched) {
-      const text = row.textContent ?? "";
+      const text = agentRowText(row);
       const previous = rowTexts.get(row) ?? "";
       rowTexts.set(row, text);
       const delta = text.length - previous.length;
@@ -1881,7 +1906,7 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
     observing = want;
     if (want) {
       document.querySelectorAll("[data-timeline-items] [data-timeline-row-id]").forEach((row) => {
-        rowTexts.set(row, row.textContent ?? "");
+        rowTexts.set(row, agentRowText(row));
       });
       observer.observe(document.body, { subtree: true, childList: true, characterData: true });
     } else {
