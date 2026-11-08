@@ -11,7 +11,7 @@ compatibility and measurement boundaries. No related issue is claimed resolved.
 
 ## Checks
 
-- `npm run test:achievements`: **21 tests pass**, including an explicit coverage
+- `npm run test:achievements`: **26 tests pass**, including an explicit coverage
   assertion that every one of the 32 additions earned in a positive scenario.
 - `npm run typecheck`: pass against SDK 0.6.132.
 - `bb plugin build`: pass, frontend/backend/CSS artifacts generated.
@@ -54,3 +54,13 @@ word counts carry a single in-word flag across streamed chunks and reconcile at
 completion. Per-thread lifetime counters scale with visited threads (capped at ten
 per thread), and session maps expire after idle/reload. Multi-window stat merging
 remains issue #10's existing boundary; this build adds no competing sync protocol.
+
+## Follow-up review fixes
+
+Regression coverage now includes native delete-to-empty followed by fresh input,
+submission handoff preservation, undo restoration, visibility changes during an
+in-flight request and between polls, stale cursor seeds/errors, and turns mixing
+fully observed messages with messages whose start was missed. All 26 tests,
+TypeScript, plugin build and diff checks pass after these fixes. The browser
+results above are from the original build; these follow-ups use deterministic
+adapter tests rather than claiming a new live-provider run.

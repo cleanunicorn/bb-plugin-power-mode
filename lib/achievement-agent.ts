@@ -22,6 +22,7 @@ function countChunk(message: Message, text: string) {
   }
 }
 interface ObservedTurn {
+  partial: boolean;
   messages: Map<string, Message>;
 }
 export class AgentObservation {
@@ -54,7 +55,7 @@ export class AgentObservation {
       if (!d || typeof d !== "object") continue;
       if (row.type === "turn/started") {
         if (d.parentToolCallId || this.turns.has(id)) continue;
-        this.turns.set(id, { messages: new Map() });
+        this.turns.set(id, { messages: new Map(), partial: false });
         this.emit({
           type: "start",
           thread: this.thread,
@@ -82,7 +83,7 @@ export class AgentObservation {
               countChunk(m, item.text);
             }
             m.done = true;
-          }
+          } else turn.partial = true;
         }
         this.emit({ type: "activity", thread: this.thread, turn: id });
       }
@@ -93,6 +94,7 @@ export class AgentObservation {
       ) {
         const m = turn.messages.get(d.itemId);
         if (m) countChunk(m, d.delta);
+        else turn.partial = true;
         this.emit({ type: "activity", thread: this.thread, turn: id });
       }
       if (row.type === "turn/completed") {
@@ -106,7 +108,9 @@ export class AgentObservation {
           turn: id,
           status: typeof d.status === "string" ? d.status : "unknown",
           fresh:
-            messages.length > 0 && messages.every((m) => m.started && m.done),
+            !turn.partial &&
+            messages.length > 0 &&
+            messages.every((m) => m.started && m.done),
           words,
         });
       }

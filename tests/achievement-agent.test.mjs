@@ -35,3 +35,42 @@ test("canonical cursor suppresses replay; split words count once; partial observ
   a.accept([row("turn/completed", { status: "completed" })]);
   assert.equal(out.at(-1).type, "disconnect");
 });
+
+test("an unobserved message makes the whole reply partial", () => {
+  for (const missing of ["item/completed", "item/agentMessage/delta"]) {
+    const out = [],
+      a = new AgentObservation((e) => out.push(e), "t");
+    a.seed(0);
+    let seq = 0;
+    const row = (type, data = {}) => ({
+      seq: ++seq,
+      createdAt: seq,
+      scope: { kind: "turn", turnId: "r" },
+      type,
+      data,
+    });
+    a.accept([
+      row("turn/started"),
+      row("item/started", {
+        item: { type: "agentMessage", id: "seen", text: "hello" },
+      }),
+      row("item/completed", {
+        item: { type: "agentMessage", id: "seen", text: "hello" },
+      }),
+      row(
+        missing,
+        missing === "item/completed"
+          ? {
+              item: {
+                type: "agentMessage",
+                id: "missed",
+                text: "unobserved reply",
+              },
+            }
+          : { itemId: "missed", delta: "unobserved reply" },
+      ),
+      row("turn/completed", { status: "completed" }),
+    ]);
+    assert.equal(out.at(-1).fresh, false, missing);
+  }
+});
