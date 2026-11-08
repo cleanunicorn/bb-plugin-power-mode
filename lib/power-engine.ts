@@ -4,7 +4,7 @@
 // floating letters, shockwaves, lightning, and (optionally) synth sound.
 //
 // Agent Power Mode: while an agent is running (reported by the app overlay
-// through `setAgentRunning`), a MutationObserver watches the transcript
+// through `syncAgentThreads`), a MutationObserver watches the transcript
 // (`[data-timeline-items]`) for text growth and sparks at the newest text.
 //
 // Rendering: a 1× particle canvas plus a quarter-resolution bloom canvas the
@@ -1871,6 +1871,7 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
       });
       observer.observe(document.body, { subtree: true, childList: true, characterData: true });
     } else {
+      for (const turn of agentTurns.values()) turn.partial = true;
       collectAgentMutations(observer.takeRecords());
       observer.disconnect();
       if (agentFlushTimer) window.clearTimeout(agentFlushTimer);
@@ -1914,6 +1915,7 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
     // Buffered rows belong to the attribution as it was before this update.
     flushPendingAgent();
     const before = creditTarget();
+    const previousVisibleId = visibleId;
     const known = new Set(snapshot.threads.map((t) => t.id));
     const nowRunning = new Set(snapshot.threads.filter((t) => t.running).map((t) => t.id));
     const finishing = settings.enabled && settings.agentMode;
@@ -1930,13 +1932,13 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
     const after = creditTarget();
     for (const id of runningIds) {
       let turn = agentTurns.get(id);
-      if (!turn) agentTurns.set(id, (turn = { words: 0, milestone: 0, partial: false }));
+      if (!turn) agentTurns.set(id, (turn = { words: 0, milestone: 0, partial: !settings.enabled || !settings.agentMode }));
       if (id !== after) turn.partial = true;
     }
-    if (after !== before) {
+    if (previousVisibleId !== visibleId) settleUntil = performance.now() + AGENT_SETTLE_MS;
+    if (after !== before || previousVisibleId !== visibleId) {
       // The transcript on screen is being swapped: ignore it while it settles
       // and let the HUD follow the new thread's own counter.
-      settleUntil = performance.now() + AGENT_SETTLE_MS;
       agentHudActive = false;
       hideHudIfIdle();
     }

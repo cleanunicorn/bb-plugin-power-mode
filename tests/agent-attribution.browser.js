@@ -143,6 +143,37 @@ const result = await page.evaluate(async () => {
   await stream(5);
   assert(hudCount() === 5, `A thread that vanished and returned starts over (${hudCount()})`);
   sync('idle', 'idle', A); await tick();
+
+  // A newly started visible turn counts output immediately, without a route swap.
+  await reset(); T.resetPowerStats(); slams.length = 0;
+  sync('running', 'idle', A);
+  await stream(25);
+  sync('idle', 'idle', A); await tick();
+  assert(stats().bestAgentWords === 25, `Immediate output counts toward the best (${stats().bestAgentWords})`);
+  assert(finales().some(s => s.includes('25 WORDS')), 'Immediate output appears in the finale');
+
+  // A turn observed only in part must never establish a best count.
+  await reset(); T.resetPowerStats();
+  T.updatePowerSettings({ agentMode: false });
+  sync('running', 'idle', A); await tick();
+  T.updatePowerSettings({ agentMode: true }); await stream(30);
+  sync('idle', 'idle', A); await tick();
+  assert(stats().bestAgentWords === 0, 'A turn started with agent mode off is partial');
+  await reset(); T.resetPowerStats();
+  sync('running', 'idle', A); await stream(10);
+  T.updatePowerSettings({ agentMode: false }); await tick();
+  T.updatePowerSettings({ agentMode: true }); await stream(30);
+  sync('idle', 'idle', A); await tick();
+  assert(stats().bestAgentWords === 0, 'A turn interrupted by disabling agent mode is partial');
+
+  // Resolving an unknown route can swap the transcript even when its target is unchanged.
+  await reset(); T.resetPowerStats();
+  sync('running', 'idle', null); await tick(30);
+  sync('running', 'idle', A);
+  row.textContent = 'A swapped transcript with many preexisting words'; await tick(30);
+  await stream(5);
+  assert(hudCount() === 5, `Route resolution must not count swapped transcript (${hudCount()})`);
+  sync('idle', 'idle', A); await tick();
   return { ok: true };
 });
 return result;

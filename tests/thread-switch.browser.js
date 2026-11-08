@@ -62,21 +62,23 @@ const result = await page.evaluate(async () => {
     assert(!r.hud, `${label}: HUD stays visible`);
   };
   advance(300);
+  const setAgentRunning = running => PowerTest.syncAgentThreads(
+    [{ id: 'thread', title: 'Thread', running, idle: !running }], 'thread');
 
   // 1. Repeated thread switches while the agent runs, then it stops.
-  PowerTest.setAgentRunning(true);
+  setAgentRunning(true);
   for (let n = 0; n < 12; n++) {
     await swapThread(n);
     items.lastChild.textContent += ' streaming more text';
     await flush();
-    PowerTest.setAgentRunning(n % 3 !== 2);
-    PowerTest.setAgentRunning(true);
+    setAgentRunning(n % 3 !== 2);
+    setAgentRunning(true);
   }
-  PowerTest.setAgentRunning(false);
+  setAgentRunning(false);
   assertQuiet('after switching threads');
 
   // 2. A frame that throws must not freeze the last frame on screen.
-  PowerTest.setAgentRunning(true);
+  setAgentRunning(true);
   items.firstChild.textContent += ' glow';
   await flush();
   assert(pixels().some(n => n > 0), 'Control: agent text must draw particles');
@@ -94,17 +96,17 @@ const result = await page.evaluate(async () => {
   try { advance(3); } catch (e) { errors.push(e.message); }
   proto.drawImage = original;
   window.removeEventListener('error', onError);
-  PowerTest.setAgentRunning(false);
+  setAgentRunning(false);
   assert(thrown > 3, 'Control: the failure must actually be injected');
   assertQuiet('after a throwing frame');
 
   // 3. Negative control: active animation survives a thread switch.
-  PowerTest.setAgentRunning(true);
+  setAgentRunning(true);
   await swapThread(99);
   items.firstChild.textContent += ' still streaming';
   await flush();
   assert(pixels().some(n => n > 0), 'Active animation must survive a thread switch');
-  PowerTest.setAgentRunning(false);
+  setAgentRunning(false);
   assertQuiet('final');
   return { threadSwitchClears: true, throwingFrameClears: true, activeAnimationSurvives: true };
 });
