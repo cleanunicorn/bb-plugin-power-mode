@@ -96,6 +96,14 @@ mid-event releases live shakes and flashes, normal effects return when reduction
 is off, and disposal removes the listener. Lightning is gated in `bolt()` but not
 asserted directly.
 
+`docs-counts.test.mjs` checks that the README's feature list matches the code: the
+achievement count, one theme name per `THEME_IDS` entry, and the ordnance table's
+tiers and combo bumps against `ORDNANCE_COMBO`. It needs only Node:
+
+```sh
+node --test tests/docs-counts.test.mjs
+```
+
 ## Achievement collection (#32)
 
 Node 24+ runs the pure reducer and adapter contract suites without a test runtime:

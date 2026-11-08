@@ -77,3 +77,10 @@ Mode’s navigation panel.
 The composer adapter relies on BB’s verified internal DOM containers and fails
 closed for unsupported layouts. See [the developer catalog](docs/achievements/catalog.md)
 and [host contract](docs/achievements/host-contract.md) for compatibility details.
+
+## Data & limitations
+
+- **Where data lives:** settings and lifetime stats/achievements are stored in the browser's `localStorage` for the bb origin, under keys namespaced by the plugin id (`<plugin id>:power-mode:settings` and `<plugin id>:power-mode:stats`). Nothing is sent to a server, and an agent cannot change them.
+- **Same browser profile:** every bb window and tab in one browser profile reads the same storage. Settings changes reach the other open windows right away (through the `storage` event).
+- **Different profiles, browsers or devices** do not share storage. Opening bb in a new browser profile, a private window, another browser or another device starts from default settings and empty stats, and clearing the site's data erases them.
+- **Multiple windows and stats:** stats are not synchronized yet. Each window loads stats once and saves its own in-memory copy about every 2 seconds, so with several windows open one window can overwrite progress (or undo a stats reset) made in another. Tracked in [#10](https://github.com/cleanunicorn/bb-plugin-power-mode/issues/10).

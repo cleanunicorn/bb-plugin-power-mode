@@ -1,6 +1,7 @@
 // Power Mode preferences, shared by the effects engine (content script) and
-// the settings UI. Stored per browser window in localStorage, keyed by the
-// plugin id, and synced across tabs through the `storage` event.
+// the settings UI. Stored in the bb origin's localStorage (shared by every
+// window in a browser profile), keyed by the plugin id, and synced across open
+// windows through the `storage` event.
 
 export type Intensity = "epic" | "legendary" | "godlike";
 export type ThemeId = "neon" | "fire" | "matrix" | "sakura" | "cyberpunk" | "retro";
