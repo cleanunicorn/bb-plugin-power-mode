@@ -42,3 +42,11 @@ freezing its last frame; and an animation started right after a swap still draws
 Findings: thread switching alone did not reproduce on current main (#5's idle
 clear covers it, but its tests never swap rows). The reproduced cause is the
 throwing frame, which ended the loop without clearing, fixed in `frame()`.
+
+`agent-attribution.browser.js` covers agent attribution (#12) through
+`syncAgentThreads`: a background thread finishing leaves the visible word count,
+`bestAgentWords` and finale alone, two simultaneous finishes show one finale for
+the visible thread, concurrent turns keep separate counts, a visible-thread change
+in the same update as a finish credits buffered rows to the old thread, an unknown
+route credits only a sole running thread, and threads that vanish start over. Run
+it with the other browser tests (`betterwright run --no-daemon tests/agent-attribution.browser.js`).

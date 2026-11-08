@@ -7,13 +7,13 @@
 // - An invisible app overlay feeds live thread status to Agent Power Mode.
 // - The plugin's Settings page has themes, particle/glow sliders, effect
 //   toggles, lifetime stats, and achievements.
-import { useEffect, useRef, useSyncExternalStore } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 import type { ReactNode } from "react";
-import { definePluginApp, experimental_useSidebarThreads } from "@get-bb/plugin-sdk/app";
+import { definePluginApp, experimental_useSidebarThreads, useBbContext } from "@get-bb/plugin-sdk/app";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
-import { agentTurnFinished, mountPowerEngine, setAgentRunning, togglePowerMode } from "@/lib/power-engine";
+import { mountPowerEngine, syncAgentThreads, togglePowerMode } from "@/lib/power-engine";
 import {
   DENSITY_RANGE,
   THEME_IDS,
@@ -38,24 +38,24 @@ function usePowerStats() {
 const RUNNING_STATUSES = new Set(["active", "starting", "pending"]);
 
 /**
- * Renders nothing. Watches live thread status and tells the engine when an
- * agent is running (so it watches the transcript) and when a turn finishes.
+ * Renders nothing. Reports every thread's status and the thread on screen to
+ * the engine, which attributes agent output and finished turns per thread.
  */
 function AgentWatcher() {
   const { threads } = experimental_useSidebarThreads();
-  const previous = useRef<Map<string, string> | null>(null);
+  const { threadId } = useBbContext();
   useEffect(() => {
-    setAgentRunning(threads.some((t) => RUNNING_STATUSES.has(t.status)));
-    const before = previous.current;
-    if (before) {
-      for (const t of threads) {
-        const was = before.get(t.id);
-        if (was && RUNNING_STATUSES.has(was) && t.status === "idle") agentTurnFinished(t.displayTitle);
-      }
-    }
-    previous.current = new Map(threads.map((t) => [t.id, t.status]));
-  }, [threads]);
-  useEffect(() => () => setAgentRunning(false), []);
+    syncAgentThreads(
+      threads.map((t) => ({
+        id: t.id,
+        title: t.displayTitle,
+        running: RUNNING_STATUSES.has(t.status),
+        idle: t.status === "idle",
+      })),
+      threadId,
+    );
+  }, [threads, threadId]);
+  useEffect(() => () => syncAgentThreads([], null), []);
   return null;
 }
 
