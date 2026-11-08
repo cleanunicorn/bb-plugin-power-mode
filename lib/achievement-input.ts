@@ -62,13 +62,21 @@ export function observeComposer(
     compositionCommit: string | null = null,
     compositionBase: string | null = null;
   let lastEditor: HTMLElement | null = null,
-    lastLength = 0;
+    lastLength = 0,
+    emptied = false;
   const resolve = (target: EventTarget | null) =>
     target instanceof Element ? composerEditor(binding, target) : null;
   const send = (
     type: AchievementEvent["type"],
     patch: Partial<AchievementEvent> = {},
   ) => emit({ type, editor: binding.key, thread: binding.thread, ...patch });
+  const beginFreshInput = (el: HTMLElement) => {
+    if (textOf(el).length === 0 && (lastLength > 0 || emptied)) {
+      send("clear");
+      lastLength = 0;
+      emptied = false;
+    }
+  };
   document.addEventListener(
     "focusin",
     (event) => {
@@ -106,6 +114,7 @@ export function observeComposer(
     (e) => {
       const el = resolve(e.target);
       if (el && e.isTrusted) {
+        beginFreshInput(el);
         composing = true;
         compositionCommit = null;
         compositionBase = textOf(el);
@@ -167,7 +176,7 @@ export function observeComposer(
         send("context");
         return;
       }
-      if (text.length === 0 && lastLength > 0 && !composing) send("clear");
+      if (!composing && e.inputType.startsWith("insert")) beginFreshInput(el);
       const direct =
         e.isTrusted &&
         !!key &&
@@ -237,6 +246,7 @@ export function observeComposer(
             history: e.inputType === "historyUndo" ? "undo" : "redo",
           });
         lastLength = textOf(el).length;
+        emptied = lastLength === 0;
         return;
       }
       const current = textOf(el);
@@ -303,6 +313,9 @@ export function observeComposer(
       });
       compositionCommit = null;
       compositionBase = null;
+      // Deleting everything is a boundary only when fresh input follows.
+      // Keep the draft available for a confirmed submission or history restore.
+      emptied = current.length === 0 && previous.length > 0;
       lastLength = current.length;
     },
     options,

@@ -1,5 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import {
+  createCollection,
+  reduceCollection,
+} from "../lib/achievement-rules.ts";
 import { observeComposer, graphemes } from "../lib/achievement-input.ts";
 test("trusted IME updates commit once; history and synthetic changes are not new typing", async () => {
   const handlers = new Map(),
@@ -62,5 +66,79 @@ test("trusted IME updates commit once; history and synthetic changes are not new
   event("input", { inputType: "insertText", data: "a", isTrusted: false });
   assert.equal(out.at(-1).provenance, "unknown");
   assert.equal(graphemes("👨‍👩‍👧‍👦e\u0301").length, 2);
+  // Native deletion must mark a draft boundary without losing submit handoffs.
+  const state = createCollection();
+  let seq = 0;
+  const apply = (e) =>
+    reduceCollection(state, {
+      now: ++seq,
+      wall: 1000 + seq,
+      seq,
+      theme: "neon",
+      thread: "t",
+      editor: "e",
+      ...e,
+    });
+  const edit = (key, inputType, data, value) => {
+    event("keydown", { key, repeat: false });
+    event("beforeinput", { inputType, data });
+    el.value = value;
+    event("input", { inputType, data });
+  };
+  out.length = 0;
+  el.value = "";
+  edit("a", "insertText", "a", "a");
+  apply({
+    type: "edit",
+    inserted: 100,
+    removed: 0,
+    from: 0,
+    length: 100,
+    provenance: "direct",
+    duck: true,
+  });
+  out.length = 0;
+  edit("Backspace", "deleteContentBackward", null, "");
+  assert.equal(
+    out.some((e) => e.type === "clear"),
+    false,
+  );
+  edit("b", "insertText", "b", "b");
+  assert.deepEqual(
+    out.map((e) => e.type),
+    ["edit", "clear", "edit"],
+  );
+  out.forEach(apply);
+  assert.equal(state.draft.entered, 1);
+  assert.equal(state.draft.duck, false);
+
+  // Confirmed submission happens before the programmatic clear/fresh input.
+  apply({
+    type: "edit",
+    inserted: 40,
+    removed: 0,
+    from: 1,
+    length: 41,
+    provenance: "direct",
+  });
+  apply({ type: "submit" });
+  el.value = "";
+  out.length = 0;
+  edit("c", "insertText", "c", "c");
+  out.forEach(apply);
+  assert.equal(state.pending.t.entered, 41);
+  assert.equal(state.draft.entered, 1);
+
+  // Undo/redo restoring text is history, not fresh input or a new draft.
+  out.length = 0;
+  edit("Backspace", "deleteContentBackward", null, "");
+  event("beforeinput", { inputType: "historyUndo" });
+  el.value = "c";
+  event("input", { inputType: "historyUndo" });
+  edit("d", "insertText", "d", "cd");
+  assert.equal(
+    out.some((e) => e.type === "clear"),
+    false,
+  );
   dispose();
 });

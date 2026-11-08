@@ -7,6 +7,7 @@ import {
 } from "@get-bb/plugin-sdk/app";
 import { observeComposer, type InputObservation } from "./achievement-input";
 import { AgentObservation } from "./achievement-agent";
+import { ObservationVisibility } from "./achievement-visibility";
 import { getPowerSettings, subscribePowerSettings } from "./power-store";
 import {
   getCollection,
@@ -108,8 +109,7 @@ export function AchievementObserver() {
     observeAchievement({ type: "context" });
     if (!threadId) return;
     const abort = new AbortController();
-    let timer = 0,
-      generation = 0;
+    let timer = 0;
     const adapter = new AgentObservation((event) => {
       if (event.type === "start" && event.wall) {
         const h = settingsHistory.current,
@@ -125,10 +125,10 @@ export function AchievementObserver() {
         });
       } else observeAchievement(event);
     }, threadId);
-    const reset = () => {
-      generation++;
-      adapter.disconnect();
-    };
+    const visibility = new ObservationVisibility(document, () =>
+      adapter.disconnect(),
+    );
+    const reset = visibility.reset;
     const unreset = onCollectionReset(reset);
     let enabled = getPowerSettings().enabled,
       agentMode = getPowerSettings().agentMode;
@@ -139,38 +139,33 @@ export function AchievementObserver() {
       agentMode = next.agentMode;
     });
     async function poll() {
-      const run = generation;
       try {
-        if (
-          !getPowerSettings().enabled ||
-          !getPowerSettings().agentMode ||
-          document.visibilityState === "hidden"
-        ) {
-          adapter.disconnect();
+        if (!getPowerSettings().enabled || !getPowerSettings().agentMode) {
+          reset();
           return;
         }
-        if (adapter.afterSeq === null) {
-          const rows = await sdk.threads.events.list({
-            threadId: threadId!,
-            order: "desc",
-            limit: "1",
-            signal: abort.signal,
-          });
-          if (!abort.signal.aborted && run === generation)
-            adapter.seed(rows[0]?.seq ?? 0);
-        } else {
-          // Bounded pages; continue on the next tick without dropping events.
-          const rows = await sdk.threads.events.list({
-            threadId: threadId!,
-            afterSeq: String(adapter.afterSeq),
-            order: "asc",
-            limit: "200",
-            signal: abort.signal,
-          });
-          if (!abort.signal.aborted && run === generation) adapter.accept(rows);
-        }
-      } catch {
-        if (!abort.signal.aborted) adapter.disconnect();
+        await visibility.run(
+          async () => {
+            const seed = adapter.afterSeq === null;
+            // Bounded pages; continue on the next tick without dropping events.
+            const rows = await sdk.threads.events.list({
+              threadId: threadId!,
+              ...(seed
+                ? { order: "desc" as const, limit: "1" }
+                : {
+                    afterSeq: String(adapter.afterSeq),
+                    order: "asc" as const,
+                    limit: "200",
+                  }),
+              signal: abort.signal,
+            });
+            return { seed, rows };
+          },
+          ({ seed, rows }) => {
+            if (seed) adapter.seed(rows[0]?.seq ?? 0);
+            else adapter.accept(rows);
+          },
+        );
       } finally {
         if (!abort.signal.aborted) timer = window.setTimeout(poll, 1000);
       }
@@ -181,7 +176,7 @@ export function AchievementObserver() {
       clearTimeout(timer);
       unreset();
       unsettings();
-      adapter.disconnect();
+      visibility.dispose();
     };
   }, [sdk, threadId]);
   return null;
