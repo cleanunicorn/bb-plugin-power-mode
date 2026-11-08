@@ -29,6 +29,8 @@ import { ORDNANCE_SKINS, THEMES, type OrdnanceSkin, type OrdnanceSound, type The
 
 const COMBO_TIMEOUT_MS = 3000;
 const AGENT_TIMEOUT_MS = 4000;
+/** Rows that appear this soon after the visible thread changes are the swapped-in transcript, not new output. */
+const AGENT_SETTLE_MS = 300;
 /** Live particle cap at density 1×; scales with the Particles slider. */
 const BASE_MAX_PARTICLES = 450;
 const MAX_GLYPHS = 60;
@@ -674,24 +676,35 @@ function hsl(hue: number, light: number): string {
 // ---------------------------------------------------------------- agent bridge
 //
 // The app overlay (a React slot with access to live thread status) reports
-// whether any agent is running and when a turn finishes. The engine may mount
-// before or after the overlay, so the latest state is kept here.
+// every thread's status plus the thread the route shows. The engine attributes
+// transcript activity to the visible thread only, keeps one counter per thread,
+// and finishes a turn for the thread that actually finished. The engine may
+// mount before or after the overlay, so the latest snapshot is kept here.
+
+export interface AgentThreadInfo {
+  id: string;
+  title: string;
+  /** An agent turn is in progress (active, starting or pending). */
+  running: boolean;
+  /** The thread is idle: a running to not-running change means its turn completed. */
+  idle: boolean;
+}
+
+interface AgentSnapshot {
+  threads: readonly AgentThreadInfo[];
+  /** The thread whose transcript is on screen, or null when unknown. */
+  visibleId: string | null;
+}
 
 interface AgentHooks {
-  running(running: boolean): void;
-  turnDone(title: string): void;
+  sync(snapshot: AgentSnapshot): void;
 }
-let agentRunning = false;
+let agentSnapshot: AgentSnapshot = { threads: [], visibleId: null };
 let agentHooks: AgentHooks | null = null;
 
-export function setAgentRunning(running: boolean) {
-  if (running === agentRunning) return;
-  agentRunning = running;
-  agentHooks?.running(running);
-}
-
-export function agentTurnFinished(title: string) {
-  agentHooks?.turnDone(title);
+export function syncAgentThreads(threads: readonly AgentThreadInfo[], visibleId: string | null) {
+  agentSnapshot = { threads, visibleId };
+  agentHooks?.sync(agentSnapshot);
 }
 
 // ---------------------------------------------------------------- engine
@@ -779,10 +792,15 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
   const keyLog: { t: number; n: number }[] = [];
 
   // Agent combo (words the agent has written this turn)
-  let agentWords = 0;
+  // One counter per running thread. Words are only credited to the thread whose
+  // transcript is on screen, so `partial` marks a turn that was partly unseen.
+  interface AgentTurn { words: number; milestone: number; partial: boolean }
+  const agentTurns = new Map<string, AgentTurn>();
+  const runningIds = new Set<string>();
+  let visibleId: string | null = null;
+  let settleUntil = 0;
   let agentHudActive = false;
   let lastAgentAt = 0;
-  let agentMilestone = 0;
 
   // Text protection: the editor being typed in.
   let activeEditor: HTMLElement | null = null;
@@ -1776,6 +1794,21 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
       return;
     }
     const now = performance.now();
+    // Rows only count for the thread on screen. While the transcript is being
+    // swapped (or when no running thread is visible) texts are recorded as the
+    // new baseline without crediting anyone.
+    const creditId = creditTarget();
+    let turn: AgentTurn | undefined;
+    if (creditId !== null && now >= settleUntil) {
+      turn = agentTurns.get(creditId);
+      // Power mode was off when this turn began, so part of it went unseen.
+      if (!turn) agentTurns.set(creditId, (turn = { words: 0, milestone: 0, partial: true }));
+    }
+    if (!turn) {
+      for (const row of touched.keys()) rowTexts.set(row, row.textContent ?? "");
+      touched.clear();
+      return;
+    }
     let totalDelta = 0;
     let wordDelta = 0;
     for (const [row, node] of touched) {
@@ -1789,9 +1822,9 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
       const point = lastTextPoint(node);
       if (!point) continue;
       attach();
-      const hue = theme.hue(agentWords + combo, now);
+      const hue = theme.hue(turn.words + combo, now);
       const tune = INTENSITY[settings.intensity];
-      burst(point.x, point.y, hue, Math.min(delta, 60) / 3 * tune.particles, 3 + Math.min(agentWords / 200, 1) * 4);
+      burst(point.x, point.y, hue, Math.min(delta, 60) / 3 * tune.particles, 3 + Math.min(turn.words / 200, 1) * 4);
       if (settings.ghostLetters && node instanceof Text) {
         const tail = Array.from(node.data.slice(-Math.min(delta, 4))).filter((c) => c.trim());
         for (const ch of tail.slice(-2)) glyph(point.x, point.y, hue, ch, 0.9);
@@ -1800,7 +1833,7 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
       // interferes with virtualization and its entrance/layout animations.
     }
     touched.clear();
-    agentWords = Math.max(0, agentWords + wordDelta);
+    turn.words = Math.max(0, turn.words + wordDelta);
     if (totalDelta <= 0 && wordDelta === 0) return;
 
     lastAgentAt = now;
@@ -1808,21 +1841,28 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
     const added = totalDelta;
     recordStats((s) => ({ ...s, agentChars: s.agentChars + added }));
 
-    const next = AGENT_MILESTONES.find((m) => m.at > agentMilestone && agentWords >= m.at);
+    const next = AGENT_MILESTONES.find((m) => m.at > turn.milestone && turn.words >= m.at);
     if (next) {
-      agentMilestone = next.at;
+      turn.milestone = next.at;
       const hue = theme.hue(next.at, now);
-      slam(next.title, `${agentWords} WORDS`, hue, "agent");
+      slam(next.title, `${turn.words} WORDS`, hue, "agent");
       explode(window.innerWidth / 2, window.innerHeight * 0.3, hue, 0.5);
       if (settings.lightning && next.at >= 300) bolt(window.innerWidth / 2, window.innerHeight * 0.3, hue);
       if (settings.sound) synth.fanfare();
     }
-    if (combo === 0) showHud("AGENT", agentWords, "WORDS", theme.hue(agentWords, now));
+    if (combo === 0) showHud("AGENT", turn.words, "WORDS", theme.hue(turn.words, now));
     start();
   }
 
+  /** The running thread that transcript activity belongs to, if there is one. */
+  function creditTarget(): string | null {
+    if (visibleId !== null) return runningIds.has(visibleId) ? visibleId : null;
+    // The route is unknown: only credit when there is no other candidate.
+    return runningIds.size === 1 ? [...runningIds][0] : null;
+  }
+
   function updateObserver() {
-    const want = settings.enabled && settings.agentMode && agentRunning && !disposed;
+    const want = settings.enabled && settings.agentMode && runningIds.size > 0 && !disposed;
     if (want === observing) return;
     observing = want;
     if (want) {
@@ -1839,37 +1879,72 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
     }
   }
 
-  function endAgentCombo() {
-    agentWords = 0;
+  /** Flush buffered rows while the attribution that produced them still holds. */
+  function flushPendingAgent() {
+    if (observing) collectAgentMutations(observer.takeRecords());
+    if (agentFlushTimer) window.clearTimeout(agentFlushTimer);
+    agentFlushTimer = 0;
+    if (touched.size) flushAgent();
+  }
+
+  function finishAgentTurn(info: AgentThreadInfo, wasCredited: boolean, onScreen: boolean) {
+    const turn = agentTurns.get(info.id);
+    agentTurns.delete(info.id);
+    // A turn that was never watched (or was only partly watched) has no
+    // trustworthy word count, so it only counts as a turn.
+    const words = turn && !turn.partial ? turn.words : 0;
+    recordStats((s) => ({ ...s, agentTurns: s.agentTurns + 1, bestAgentWords: Math.max(s.bestAgentWords, words) }));
+    if (!wasCredited) return;
+    // Only the finished thread's own HUD ends; a background finish leaves the
+    // visible thread's combo alone.
     agentHudActive = false;
-    agentMilestone = 0;
+    if (turn && onScreen && turn.words >= 20) {
+      attach();
+      const hue = theme.hue(turn.words, performance.now());
+      const name = info.title.length > 32 ? `${info.title.slice(0, 31)}…` : info.title;
+      slam("TURN COMPLETE", `${turn.words} WORDS · ${name}`, hue, "agent");
+      explode(window.innerWidth / 2, window.innerHeight * 0.3, hue, 0.8);
+      if (settings.sound) synth.fanfare();
+      start();
+    }
     hideHudIfIdle();
   }
 
-  agentHooks = {
-    running() {
-      updateObserver();
-    },
-    turnDone(title) {
-      if (!settings.enabled || !settings.agentMode) return;
-      collectAgentMutations(observer.takeRecords());
-      if (agentFlushTimer) window.clearTimeout(agentFlushTimer);
-      agentFlushTimer = 0;
-      if (touched.size) flushAgent();
-      const words = agentWords;
-      recordStats((s) => ({ ...s, agentTurns: s.agentTurns + 1, bestAgentWords: Math.max(s.bestAgentWords, words) }));
-      if (words >= 20) {
-        attach();
-        const hue = theme.hue(words, performance.now());
-        const name = title.length > 32 ? `${title.slice(0, 31)}…` : title;
-        slam("TURN COMPLETE", `${words} WORDS · ${name}`, hue, "agent");
-        explode(window.innerWidth / 2, window.innerHeight * 0.3, hue, 0.8);
-        if (settings.sound) synth.fanfare();
-        start();
-      }
-      endAgentCombo();
-    },
-  };
+  function syncAgent(snapshot: AgentSnapshot) {
+    // Buffered rows belong to the attribution as it was before this update.
+    flushPendingAgent();
+    const before = creditTarget();
+    const known = new Set(snapshot.threads.map((t) => t.id));
+    const nowRunning = new Set(snapshot.threads.filter((t) => t.running).map((t) => t.id));
+    const finishing = settings.enabled && settings.agentMode;
+    for (const info of snapshot.threads) {
+      if (!runningIds.has(info.id) || nowRunning.has(info.id)) continue;
+      if (info.idle && finishing) {
+        finishAgentTurn(info, before === info.id, snapshot.visibleId === null || snapshot.visibleId === info.id);
+      } else agentTurns.delete(info.id);
+    }
+    runningIds.clear();
+    for (const id of nowRunning) runningIds.add(id);
+    visibleId = snapshot.visibleId;
+    for (const id of [...agentTurns.keys()]) if (!known.has(id) || !runningIds.has(id)) agentTurns.delete(id);
+    const after = creditTarget();
+    for (const id of runningIds) {
+      let turn = agentTurns.get(id);
+      if (!turn) agentTurns.set(id, (turn = { words: 0, milestone: 0, partial: false }));
+      if (id !== after) turn.partial = true;
+    }
+    if (after !== before) {
+      // The transcript on screen is being swapped: ignore it while it settles
+      // and let the HUD follow the new thread's own counter.
+      settleUntil = performance.now() + AGENT_SETTLE_MS;
+      agentHudActive = false;
+      hideHudIfIdle();
+    }
+    updateObserver();
+  }
+
+  agentHooks = { sync: syncAgent };
+  syncAgent(agentSnapshot);
 
   // ---- text protection
   // Fade only the overlay pixels. Inserting fixed canvases into host editor
@@ -2622,9 +2697,8 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
     } else if (was && !next.enabled) {
       resetOrdnance();
       combo = 0;
-      agentWords = 0;
+      agentTurns.clear();
       agentHudActive = false;
-      agentMilestone = 0;
       hud.classList.remove("pm-on");
       vignette.style.opacity = "0";
       restoreShakes();

@@ -9,7 +9,7 @@ Typing effects for bb, in the spirit of VS Code's Power Mode — turned up.
 - Combo counter with WPM gauge, draining timer, tier titles, and milestone slams with explosions and lightning
 - Flying letters, red shards on Backspace, shockwave on Enter
 - **Paste ordnance:** pasting drops theme-styled ordnance that scales with the paste, across 9 levels from firecracker to singularity (see below)
-- **Agent Power Mode:** while an agent writes its reply, sparks fly from the newest text, an agent word combo builds ("AGENT IS COOKING" → "AGI ACHIEVED?!"), and a "TURN COMPLETE" finale plays when it finishes
+- **Agent Power Mode:** while an agent writes its reply, sparks fly from the newest text, an agent word combo builds ("AGENT IS COOKING" → "AGI ACHIEVED?!"), and a "TURN COMPLETE" finale plays when it finishes. Effects and word counts belong to the thread on screen: a background thread finishing never resets or claims the visible count, and each finale carries its own thread's words and title (turns that were only partly on screen count as turns but not toward best words)
 - **Stats & achievements:** 19 unlockables (combos, WPM, lifetime characters, Night Owl, Theme Tourist, agent cheering…), shown as toasts and in Settings
 - Optional synth sound
 
