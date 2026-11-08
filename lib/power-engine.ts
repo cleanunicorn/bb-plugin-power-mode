@@ -780,6 +780,7 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
 
   // Agent combo (words the agent has written this turn)
   let agentWords = 0;
+  let agentHudActive = false;
   let lastAgentAt = 0;
   let agentMilestone = 0;
 
@@ -1500,7 +1501,7 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
   }
 
   function hideHudIfIdle() {
-    if (combo === 0 && agentWords === 0) {
+    if (combo === 0 && !agentHudActive) {
       hud.classList.remove("pm-on");
       vignette.style.opacity = "0";
       wpmText = setText(hudWpm, "", wpmText);
@@ -1720,24 +1721,35 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
 
   // ---- agent output
 
-  const rowLengths = new WeakMap<Element, number>();
+  const rowTexts = new WeakMap<Element, string>();
+  const wordCount = (text: string) => (text.match(/\S+/gu) ?? []).length;
   const touched = new Map<HTMLElement, Node>();
   let agentFlushTimer = 0;
   let observing = false;
 
-  const observer = new MutationObserver((records) => {
+  function collectAgentMutations(records: MutationRecord[]) {
     for (const r of records) {
       const node = r.target;
       const el = node instanceof Element ? node : node.parentElement;
       if (!el) continue;
       const row = el.closest<HTMLElement>("[data-timeline-row-id]");
-      if (!row || !row.closest("[data-timeline-items]")) continue;
+      if (!row || !row.closest("[data-timeline-items]")) {
+        for (const added of Array.from(r.addedNodes)) {
+          if (!(added instanceof Element)) continue;
+          const rows = [added, ...Array.from(added.querySelectorAll("[data-timeline-row-id]"))];
+          for (const candidate of rows) {
+            if (candidate instanceof HTMLElement && candidate.matches("[data-timeline-row-id]") && candidate.closest("[data-timeline-items]")) touched.set(candidate, candidate);
+          }
+        }
+        continue;
+      }
       if (el.closest('[contenteditable="true"],textarea,input')) continue;
       const last = r.type === "childList" && r.addedNodes.length ? r.addedNodes[r.addedNodes.length - 1] : node;
       touched.set(row, last);
     }
     if (touched.size && !agentFlushTimer) agentFlushTimer = window.setTimeout(flushAgent, 70);
-  });
+  }
+  const observer = new MutationObserver(collectAgentMutations);
 
   function lastTextPoint(node: Node): { x: number; y: number } | null {
     let text: Text | null = null;
@@ -1765,14 +1777,14 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
     }
     const now = performance.now();
     let totalDelta = 0;
+    let wordDelta = 0;
     for (const [row, node] of touched) {
-      const len = row.textContent?.length ?? 0;
-      const prev = rowLengths.get(row);
-      rowLengths.set(row, len);
-      // A row seen for the first time only counts when it is small (a new
-      // streaming reply), not a virtualized old row scrolling back into view.
-      const delta = prev === undefined ? (len < 80 ? len : 0) : len - prev;
-      if (delta <= 0 || delta > 2000) continue;
+      const text = row.textContent ?? "";
+      const previous = rowTexts.get(row) ?? "";
+      rowTexts.set(row, text);
+      const delta = text.length - previous.length;
+      wordDelta += wordCount(text) - wordCount(previous);
+      if (delta <= 0) continue;
       totalDelta += delta;
       const point = lastTextPoint(node);
       if (!point) continue;
@@ -1788,10 +1800,11 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
       // interferes with virtualization and its entrance/layout animations.
     }
     touched.clear();
-    if (totalDelta <= 0) return;
+    agentWords = Math.max(0, agentWords + wordDelta);
+    if (totalDelta <= 0 && wordDelta === 0) return;
 
     lastAgentAt = now;
-    agentWords += Math.max(1, Math.round(totalDelta / 5.5));
+    agentHudActive = true;
     const added = totalDelta;
     recordStats((s) => ({ ...s, agentChars: s.agentChars + added }));
 
@@ -1812,12 +1825,23 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
     const want = settings.enabled && settings.agentMode && agentRunning && !disposed;
     if (want === observing) return;
     observing = want;
-    if (want) observer.observe(document.body, { subtree: true, childList: true, characterData: true });
-    else observer.disconnect();
+    if (want) {
+      document.querySelectorAll("[data-timeline-items] [data-timeline-row-id]").forEach((row) => {
+        rowTexts.set(row, row.textContent ?? "");
+      });
+      observer.observe(document.body, { subtree: true, childList: true, characterData: true });
+    } else {
+      collectAgentMutations(observer.takeRecords());
+      observer.disconnect();
+      if (agentFlushTimer) window.clearTimeout(agentFlushTimer);
+      agentFlushTimer = 0;
+      if (touched.size) flushAgent();
+    }
   }
 
   function endAgentCombo() {
     agentWords = 0;
+    agentHudActive = false;
     agentMilestone = 0;
     hideHudIfIdle();
   }
@@ -1828,6 +1852,10 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
     },
     turnDone(title) {
       if (!settings.enabled || !settings.agentMode) return;
+      collectAgentMutations(observer.takeRecords());
+      if (agentFlushTimer) window.clearTimeout(agentFlushTimer);
+      agentFlushTimer = 0;
+      if (touched.size) flushAgent();
       const words = agentWords;
       recordStats((s) => ({ ...s, agentTurns: s.agentTurns + 1, bestAgentWords: Math.max(s.bestAgentWords, words) }));
       if (words >= 20) {
@@ -2287,7 +2315,7 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
     } finally {
       raf = 0;
     }
-    if (particles.length > 0 || shakes.size > 0 || combo > 0 || agentWords > 0 || pendingOrdnance > 0) {
+    if (particles.length > 0 || shakes.size > 0 || combo > 0 || agentHudActive || pendingOrdnance > 0) {
       raf = requestAnimationFrame(frame);
     } else {
       clearCanvases();
@@ -2308,11 +2336,14 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
       const left = 1 - (now - lastKeyAt) / COMBO_TIMEOUT_MS;
       if (left <= 0) endCombo();
       else hudFill.style.transform = `scaleX(${left.toFixed(3)})`;
-    } else if (agentWords > 0) {
+    } else if (agentHudActive) {
       const left = 1 - (now - lastAgentAt) / AGENT_TIMEOUT_MS;
       // End when the bar runs out even if the turn is still going (tool calls,
       // thinking): otherwise the HUD sits there empty until the turn finishes.
-      if (left <= 0) endAgentCombo();
+      if (left <= 0) {
+        agentHudActive = false;
+        hideHudIfIdle();
+      }
       else hudFill.style.transform = `scaleX(${left.toFixed(3)})`;
     }
 
@@ -2584,6 +2615,7 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
       resetOrdnance();
       combo = 0;
       agentWords = 0;
+      agentHudActive = false;
       agentMilestone = 0;
       hud.classList.remove("pm-on");
       vignette.style.opacity = "0";
