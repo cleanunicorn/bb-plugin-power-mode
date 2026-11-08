@@ -7,13 +7,21 @@
 // - An invisible app overlay feeds live thread status to Agent Power Mode.
 // - The plugin's Settings page has themes, particle/glow sliders, effect
 //   toggles, lifetime stats, and achievements.
-import { useEffect, useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import type { ReactNode } from "react";
-import { definePluginApp, experimental_useSidebarThreads, useBbContext } from "@get-bb/plugin-sdk/app";
+import {
+  definePluginApp,
+  experimental_useSidebarThreads,
+  useBbContext,
+} from "@get-bb/plugin-sdk/app";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
-import { mountPowerEngine, syncAgentThreads, togglePowerMode } from "@/lib/power-engine";
+import {
+  mountPowerEngine,
+  syncAgentThreads,
+  togglePowerMode,
+} from "@/lib/power-engine";
 import {
   DENSITY_RANGE,
   THEME_IDS,
@@ -24,7 +32,21 @@ import {
   type Intensity,
   type PowerSettings,
 } from "@/lib/power-store";
-import { ACHIEVEMENTS, getPowerStats, resetPowerStats, subscribePowerStats } from "@/lib/power-stats";
+import {
+  ACHIEVEMENTS,
+  getPowerStats,
+  resetPowerStats,
+  subscribePowerStats,
+} from "@/lib/power-stats";
+import {
+  AchievementComposer,
+  AchievementObserver,
+} from "./lib/achievement-observer";
+import {
+  availableTitles,
+  challengeProgress,
+} from "./lib/achievement-presentation";
+import { getCollection, setCollectionPreference } from "./lib/power-stats";
 import { THEMES } from "@/lib/power-themes";
 
 function usePowerSettings(): PowerSettings {
@@ -61,18 +83,63 @@ function AgentWatcher() {
 
 const INTENSITY_OPTIONS: { id: Intensity; label: string; hint: string }[] = [
   { id: "epic", label: "Epic", hint: "Sparks and a gentle rumble." },
-  { id: "legendary", label: "Legendary", hint: "Twice the particles, harder shake." },
-  { id: "godlike", label: "Godlike", hint: "Everything. The whole screen shakes." },
+  {
+    id: "legendary",
+    label: "Legendary",
+    hint: "Twice the particles, harder shake.",
+  },
+  {
+    id: "godlike",
+    label: "Godlike",
+    hint: "Everything. The whole screen shakes.",
+  },
 ];
 
-const EFFECT_OPTIONS: { key: keyof PowerSettings; label: string; hint: string }[] = [
-  { key: "protectText", label: "Keep text clear", hint: "Effects gently fade near the caret while you type, so the text stays readable." },
-  { key: "shake", label: "Editor shake", hint: "The text box jumps on every keystroke." },
-  { key: "screenShake", label: "Screen shake", hint: "The whole window quakes on combos and Enter." },
-  { key: "ghostLetters", label: "Flying letters", hint: "Each typed character launches off the caret." },
-  { key: "lightning", label: "Lightning", hint: "Bolts strike the caret at combo milestones." },
-  { key: "agentMode", label: "Agent Power Mode", hint: "Sparks fly while agents write their replies, with combos and a turn-complete finale." },
-  { key: "sound", label: "Sound", hint: "Synth blips that climb with the combo, booms on milestones." },
+const EFFECT_OPTIONS: {
+  key: keyof PowerSettings;
+  label: string;
+  hint: string;
+}[] = [
+  {
+    key: "particles",
+    label: "Particle effects",
+    hint: "Turn particles off while continuing to collect achievements.",
+  },
+  {
+    key: "protectText",
+    label: "Keep text clear",
+    hint: "Effects gently fade near the caret while you type, so the text stays readable.",
+  },
+  {
+    key: "shake",
+    label: "Editor shake",
+    hint: "The text box jumps on every keystroke.",
+  },
+  {
+    key: "screenShake",
+    label: "Screen shake",
+    hint: "The whole window quakes on combos and Enter.",
+  },
+  {
+    key: "ghostLetters",
+    label: "Flying letters",
+    hint: "Each typed character launches off the caret.",
+  },
+  {
+    key: "lightning",
+    label: "Lightning",
+    hint: "Bolts strike the caret at combo milestones.",
+  },
+  {
+    key: "agentMode",
+    label: "Agent Power Mode",
+    hint: "Sparks fly while agents write their replies, with combos and a turn-complete finale.",
+  },
+  {
+    key: "sound",
+    label: "Sound",
+    hint: "Synth blips that climb with the combo, booms on milestones.",
+  },
 ];
 
 function Row({ children }: { children: ReactNode }) {
@@ -89,8 +156,8 @@ function SettingsSection() {
             Power Mode is {settings.enabled ? "ON ⚡" : "off"}
           </div>
           <p className="text-xs text-muted-foreground">
-            Toggle any time with the ⚡ button in the sidebar footer, or “Power Mode: Toggle” in the
-            command palette. Saved per browser window.
+            Toggle any time with the ⚡ button in the sidebar footer, or “Power
+            Mode: Toggle” in the command palette. Saved per browser window.
           </p>
         </div>
         <Button
@@ -103,7 +170,11 @@ function SettingsSection() {
 
       <div>
         <div className="mb-2 text-sm font-medium">Intensity</div>
-        <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label="Intensity">
+        <div
+          className="grid grid-cols-3 gap-2"
+          role="radiogroup"
+          aria-label="Intensity"
+        >
           {INTENSITY_OPTIONS.map((option) => (
             <button
               key={option.id}
@@ -119,7 +190,9 @@ function SettingsSection() {
               )}
             >
               <div className="text-sm font-semibold">{option.label}</div>
-              <div className="mt-0.5 text-xs text-muted-foreground">{option.hint}</div>
+              <div className="mt-0.5 text-xs text-muted-foreground">
+                {option.hint}
+              </div>
             </button>
           ))}
         </div>
@@ -127,7 +200,11 @@ function SettingsSection() {
 
       <div>
         <div className="mb-2 text-sm font-medium">Theme</div>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3" role="radiogroup" aria-label="Theme">
+        <div
+          className="grid grid-cols-2 gap-2 sm:grid-cols-3"
+          role="radiogroup"
+          aria-label="Theme"
+        >
           {THEME_IDS.map((id) => {
             const theme = THEMES[id];
             const selected = settings.theme === id;
@@ -140,7 +217,9 @@ function SettingsSection() {
                 onClick={() => updatePowerSettings({ theme: id })}
                 className={cn(
                   "rounded-lg border p-3 text-left transition-colors",
-                  selected ? "border-foreground bg-state-active" : "border-border hover:bg-state-hover",
+                  selected
+                    ? "border-foreground bg-state-active"
+                    : "border-border hover:bg-state-hover",
                 )}
               >
                 <div className="flex items-center justify-between gap-2">
@@ -149,11 +228,17 @@ function SettingsSection() {
                   </span>
                   <span className="flex" aria-hidden>
                     {theme.swatch.map((color) => (
-                      <span key={color} className="-ml-1 size-3 rounded-full ring-1 ring-background" style={{ background: color }} />
+                      <span
+                        key={color}
+                        className="-ml-1 size-3 rounded-full ring-1 ring-background"
+                        style={{ background: color }}
+                      />
                     ))}
                   </span>
                 </div>
-                <div className="mt-1 text-xs text-muted-foreground">{theme.description}</div>
+                <div className="mt-1 text-xs text-muted-foreground">
+                  {theme.description}
+                </div>
               </button>
             );
           })}
@@ -195,12 +280,16 @@ function SettingsSection() {
                   className="mt-0.5"
                   checked={settings[option.key] === true}
                   onCheckedChange={(checked) =>
-                    updatePowerSettings({ [option.key]: checked === true } as Partial<PowerSettings>)
+                    updatePowerSettings({
+                      [option.key]: checked === true,
+                    } as Partial<PowerSettings>)
                   }
                 />
                 <label htmlFor={id} className="cursor-pointer">
                   <div className="text-sm">{option.label}</div>
-                  <div className="text-xs text-muted-foreground">{option.hint}</div>
+                  <div className="text-xs text-muted-foreground">
+                    {option.hint}
+                  </div>
                 </label>
               </Row>
             );
@@ -230,7 +319,9 @@ function Slider(props: {
         <label htmlFor={id} className="font-medium">
           {props.label}
         </label>
-        <span className="tabular-nums text-muted-foreground">{props.format(props.value)}</span>
+        <span className="tabular-nums text-muted-foreground">
+          {props.format(props.value)}
+        </span>
       </div>
       <input
         id={id}
@@ -250,14 +341,26 @@ function Slider(props: {
 function Stat({ label, value }: { label: string; value: string | number }) {
   return (
     <div className="rounded-lg border border-border bg-card px-3 py-2">
-      <div className="text-lg font-semibold tabular-nums">{typeof value === "number" ? value.toLocaleString() : value}</div>
+      <div className="text-lg font-semibold tabular-nums">
+        {typeof value === "number" ? value.toLocaleString() : value}
+      </div>
       <div className="text-xs text-muted-foreground">{label}</div>
     </div>
   );
 }
 
-function StatsAndAchievements() {
+export function StatsAndAchievements() {
   const stats = usePowerStats();
+  const [category, setCategory] = useState("All");
+  const [onlyUnlocked, setOnlyUnlocked] = useState(false);
+  const collection = getCollection();
+  const titles = availableTitles(stats);
+  const visible = ACHIEVEMENTS.filter(
+    (a) =>
+      (category === "All" || a.category === category) &&
+      (!onlyUnlocked || stats.unlocked[a.id]),
+  );
+  const next = ACHIEVEMENTS.find((a) => !a.hidden && !stats.unlocked[a.id]);
   const unlockedCount = ACHIEVEMENTS.filter((a) => stats.unlocked[a.id]).length;
   return (
     <div className="space-y-3">
@@ -268,20 +371,108 @@ function StatsAndAchievements() {
         <Stat label="Best WPM" value={stats.bestWpm} />
         <Stat label="Milestones hit" value={stats.milestones} />
         <Stat label="Agent chars cheered" value={stats.agentChars} />
-        <Stat label="Longest agent reply" value={`${stats.bestAgentWords} words`} />
+        <Stat
+          label="Longest agent reply"
+          value={`${stats.bestAgentWords} words`}
+        />
         <Stat label="Agent turns" value={stats.agentTurns} />
-        <Stat label="Achievements" value={`${unlockedCount}/${ACHIEVEMENTS.length}`} />
+        <Stat
+          label="Achievements"
+          value={`${unlockedCount}/${ACHIEVEMENTS.length}`}
+        />
       </div>
       <div className="pt-2 text-sm font-medium">Achievements</div>
+      <p className="text-xs text-muted-foreground">
+        Agent badges record observed activity. They do not judge correctness or
+        task success. A session ends after ten idle minutes or reload.
+      </p>
+      <div className="flex flex-wrap gap-3">
+        <label>
+          Collection{" "}
+          <select
+            value={category}
+            onChange={(e) => setCategory(e.target.value)}
+          >
+            {["All", "Human", "Agent", "Together"].map((c) => (
+              <option key={c}>{c}</option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <input
+            type="checkbox"
+            checked={onlyUnlocked}
+            onChange={(e) => setOnlyUnlocked(e.target.checked)}
+          />{" "}
+          Unlocked only
+        </label>
+        <label>
+          HUD title{" "}
+          <select
+            value={
+              titles.includes(collection.saved.title ?? "")
+                ? (collection.saved.title ?? "")
+                : ""
+            }
+            onChange={(e) =>
+              setCollectionPreference({ title: e.target.value || null })
+            }
+          >
+            <option value="">None</option>
+            {titles.map((t) => (
+              <option key={t}>{t}</option>
+            ))}
+          </select>
+        </label>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Titles: five Human, five Agent, three Together, or five discoveries. Pin
+        one visible challenge for a quiet reminder beside WPM.
+      </p>
+      <section
+        aria-label="Session postcard"
+        className="rounded-lg border p-3 text-sm"
+      >
+        <strong>Your session postcard</strong>
+        <p>
+          Personal best: {Math.round(collection.saved.best)} sustained WPM ·
+          Session best: {Math.round(collection.session.best)} WPM
+        </p>
+        <p>
+          New discoveries:{" "}
+          {collection.session.discoveries
+            .map((id) => ACHIEVEMENTS.find((a) => a.id === id)?.title)
+            .join(", ") || "Room for a little surprise."}
+        </p>
+        <p>
+          {next
+            ? `Next challenge: ${next.title} — ${challengeProgress(next.id, stats)}`
+            : "The collection is complete. Enjoy the view."}
+        </p>
+      </section>
+      {!visible.length && <p>No discoveries in this view yet.</p>}
       <ul className="grid gap-2 sm:grid-cols-2">
-        {ACHIEVEMENTS.map((a) => {
+        {visible.map((a) => {
           const at = stats.unlocked[a.id];
+          if (a.hidden && !at)
+            return (
+              <li
+                key={a.id}
+                className="rounded-lg border border-dashed px-3 py-2 text-sm"
+              >
+                <span aria-hidden="true">◇ </span>
+                <strong>Undiscovered</strong>
+                <p>A discovery awaits.</p>
+              </li>
+            );
           return (
             <li
               key={a.id}
               className={cn(
                 "flex items-center gap-3 rounded-lg border px-3 py-2",
-                at ? "border-border bg-card" : "border-dashed border-border opacity-55",
+                at
+                  ? "border-border bg-card"
+                  : "border-dashed border-border opacity-55",
               )}
             >
               <span className={cn("text-2xl", !at && "grayscale")} aria-hidden>
@@ -293,6 +484,24 @@ function StatsAndAchievements() {
                   {a.description}
                   {at ? ` · ${new Date(at).toLocaleDateString()}` : ""}
                 </div>
+                {at && a.flavor && <p className="text-xs">{a.flavor}</p>}
+                {!at && (
+                  <p className="text-xs">{challengeProgress(a.id, stats)}</p>
+                )}
+                {!a.hidden && (
+                  <button
+                    type="button"
+                    className="text-xs underline"
+                    aria-pressed={collection.saved.pin === a.id}
+                    onClick={() =>
+                      setCollectionPreference({
+                        pin: collection.saved.pin === a.id ? null : a.id,
+                      })
+                    }
+                  >
+                    {collection.saved.pin === a.id ? "Unpin" : "Pin challenge"}
+                  </button>
+                )}
               </div>
             </li>
           );
@@ -303,7 +512,9 @@ function StatsAndAchievements() {
           variant="ghost"
           size="sm"
           onClick={() => {
-            if (window.confirm("Reset all Power Mode stats and achievements?")) {
+            if (
+              window.confirm("Reset all Power Mode stats and achievements?")
+            ) {
               resetPowerStats();
               updatePowerSettings({ bestCombo: 0 });
             }
@@ -340,7 +551,28 @@ export default definePluginApp((app) => {
     run: () => togglePowerMode(),
   });
 
-  app.slots.experimental_appOverlay({ id: "agent-watcher", component: AgentWatcher });
+  app.slots.experimental_appOverlay({
+    id: "agent-watcher",
+    component: AgentWatcher,
+  });
+  app.slots.experimental_appOverlay({
+    id: "achievement-observer",
+    component: AchievementObserver,
+  });
+  app.composer.customize({
+    id: "achievement-input",
+    scopes: ["thread", "new-thread"],
+    banners: [
+      { id: "observer", chrome: "bare", component: AchievementComposer },
+    ],
+  });
+  app.slots.navPanel({
+    id: "achievements",
+    path: "achievements",
+    title: "Power Mode achievements",
+    icon: "Zap",
+    component: StatsAndAchievements,
+  });
 
   app.slots.settingsSection({
     id: "power",

@@ -467,7 +467,6 @@ interface Window {
   start: number;
   last: number;
   chars: number;
-  buckets: number[];
   theme: string | null;
   thread: string | null;
 }
@@ -496,6 +495,7 @@ export interface Collection {
   lastNow: number;
   draft?: Draft;
   window?: Window;
+  rhythm?: { start: number; buckets: number[] };
   combo?: {
     count: number;
     last: number;
@@ -579,6 +579,7 @@ export function reduceCollection(s: Collection, e: AchievementEvent): string[] {
   if (e.now < s.lastNow) {
     s.draft = undefined;
     s.window = undefined;
+    s.rhythm = undefined;
     s.combo = undefined;
     s.previousInput = undefined;
     s.pending = dict();
@@ -597,6 +598,7 @@ export function reduceCollection(s: Collection, e: AchievementEvent): string[] {
   const resetLocal = () => {
     s.draft = undefined;
     s.window = undefined;
+    s.rhythm = undefined;
     s.combo = undefined;
     s.previousInput = undefined;
   };
@@ -681,16 +683,20 @@ export function reduceCollection(s: Collection, e: AchievementEvent): string[] {
       }
       if (w.thread) s.session.speed[w.thread] = true;
     } else s.session.stair = [];
-    const mean = w.buckets.reduce((a, b) => a + b, 0) / 3;
+    s.window = undefined;
+  }
+  const rhythm = s.rhythm;
+  if (rhythm && e.now >= rhythm.start + RULES.window) {
+    const mean = rhythm.buckets.reduce((a, b) => a + b, 0) / 3;
     if (
-      w.buckets.every(
+      rhythm.buckets.every(
         (n) =>
           n >= RULES.bucketChars &&
           Math.abs(n - mean) <= mean * RULES.tolerance + 1e-9,
       )
     )
       award("pocket-drummer");
-    s.window = undefined;
+    s.rhythm = undefined;
   }
   if (e.type === "edit") {
     if (
@@ -723,6 +729,7 @@ export function reduceCollection(s: Collection, e: AchievementEvent): string[] {
     if (d.theme !== e.theme) d.theme = null;
     if (!eligible) {
       s.window = undefined;
+      s.rhythm = undefined;
       s.combo = undefined;
       d.ranges = [];
       d.history = 0;
@@ -814,15 +821,15 @@ export function reduceCollection(s: Collection, e: AchievementEvent): string[] {
           start: e.now,
           last: e.now,
           chars: 0,
-          buckets: [0, 0, 0],
           theme: e.theme,
           thread: e.thread,
         };
         const win = s.window;
         win.last = e.now;
         win.chars += count;
-        win.buckets[
-          Math.min(2, Math.floor((e.now - win.start) / RULES.bucket))
+        s.rhythm ??= { start: e.now, buckets: [0, 0, 0] };
+        s.rhythm.buckets[
+          Math.min(2, Math.floor((e.now - s.rhythm.start) / RULES.bucket))
         ] += count;
         if (win.theme !== e.theme) win.theme = null;
         s.combo ??= { count: 0, last: e.now, theme: e.theme, silent: e.silent };
@@ -834,12 +841,14 @@ export function reduceCollection(s: Collection, e: AchievementEvent): string[] {
           award("silent-disco");
       } else if (count > 0) {
         s.window = undefined;
+        s.rhythm = undefined;
         s.combo = undefined;
       }
     }
   }
   if (e.type === "history" && s.draft) {
     s.window = undefined;
+    s.rhythm = undefined;
     s.combo = undefined;
     s.draft.ranges = [];
     s.draft.trimmed = false;
@@ -866,6 +875,7 @@ export function reduceCollection(s: Collection, e: AchievementEvent): string[] {
     else s.pending[e.thread] = handoff;
     s.draft = undefined;
     s.window = undefined;
+    s.rhythm = undefined;
     s.combo = undefined;
   }
   if (e.type === "clear") s.draft = undefined;
@@ -968,7 +978,7 @@ export function progress(
     ],
     "stairway-flow": [s.session.stair.length, 3, "rising windows this session"],
     "pocket-drummer": [
-      s.window?.buckets.filter((n) => n >= RULES.bucketChars).length ?? 0,
+      s.rhythm?.buckets.filter((n) => n >= RULES.bucketChars).length ?? 0,
       3,
       "steady buckets",
     ],

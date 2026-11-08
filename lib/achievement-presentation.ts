@@ -1,0 +1,97 @@
+import { ACHIEVEMENTS, getCollection, type PowerStats } from "./power-stats";
+import { progress } from "./achievement-rules";
+export const TITLES = [
+  "Rhythm Mage",
+  "Co-Pilot",
+  "Duet Captain",
+  "Secret Cartographer",
+] as const;
+export function availableTitles(stats: PowerStats): string[] {
+  const count = (category: string) =>
+    ACHIEVEMENTS.filter(
+      (a) => !a.hidden && a.category === category && stats.unlocked[a.id],
+    ).length;
+  return [
+    count("Human") >= 5 ? TITLES[0] : null,
+    count("Agent") >= 5 ? TITLES[1] : null,
+    count("Together") >= 3 ? TITLES[2] : null,
+    ACHIEVEMENTS.filter((a) => a.hidden && stats.unlocked[a.id]).length >= 5
+      ? TITLES[3]
+      : null,
+  ].filter((x): x is (typeof TITLES)[number] => x !== null);
+}
+export function challengeProgress(id: string, stats: PowerStats): string {
+  const a = ACHIEVEMENTS.find((x) => x.id === id);
+  if (!a || (a.hidden && !stats.unlocked[id])) return "";
+  if (stats.unlocked[id]) return "Discovered";
+  if (a.requires.includes("legacy-stats")) {
+    let value = 0,
+      target = 1,
+      label = "";
+    if (id.startsWith("combo-")) {
+      value = stats.bestCombo;
+      target = Number(id.slice(6));
+      label = "best combo";
+    } else if (id.startsWith("wpm-")) {
+      value = stats.bestWpm;
+      target = Number(id.slice(4));
+      label = "burst WPM";
+    } else if (id.startsWith("chars-")) {
+      value = stats.chars;
+      target = Number(id.slice(6, -1)) * 1000;
+      label = "characters";
+    } else if (id === "first-spark") {
+      value = stats.chars;
+      label = "characters";
+    } else if (id === "deletes-500") {
+      value = stats.deletes;
+      target = 500;
+      label = "deletions";
+    } else if (id === "pastes-25") {
+      value = stats.pastes;
+      target = 25;
+      label = "pastes";
+    } else if (id === "agent-hype") {
+      value = stats.agentChars;
+      target = 1000;
+      label = "observed characters";
+    } else if (id === "agent-500") {
+      value = stats.bestAgentWords;
+      target = 500;
+      label = "observed words";
+    } else if (id === "agent-turns-25") {
+      value = stats.agentTurns;
+      target = 25;
+      label = "observed turns";
+    } else if (id === "theme-tourist") {
+      value = stats.themesTried.length;
+      target = 6;
+      label = "themes tried";
+    } else return "A moment to discover";
+    return `${Math.min(value, target)} / ${target} ${label}`;
+  }
+  const p = progress(id, getCollection());
+  return `${Math.round(p.value * 10) / 10} / ${p.target} ${p.label}`;
+}
+export function hudChallenge(stats: PowerStats): string {
+  const c = getCollection(),
+    a = ACHIEVEMENTS.find((a) => a.id === c.saved.pin && !a.hidden);
+  const title = availableTitles(stats).includes(c.saved.title ?? "")
+    ? c.saved.title
+    : null;
+  const ghost =
+    a &&
+    ["cruise-control", "afterburner", "ghost-chaser", "stairway-flow"].includes(
+      a.id,
+    )
+      ? ` · 👻 PB ${Math.round(c.saved.best)} WPM`
+      : "";
+  return [
+    title,
+    a
+      ? `${a.icon} ${a.title} · ${challengeProgress(a.id, stats)}${ghost}`
+      : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}

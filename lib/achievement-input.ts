@@ -70,6 +70,25 @@ export function observeComposer(
     patch: Partial<AchievementEvent> = {},
   ) => emit({ type, editor: binding.key, thread: binding.thread, ...patch });
   document.addEventListener(
+    "focusin",
+    (event) => {
+      const target = event.target;
+      if (
+        lastEditor &&
+        target instanceof Element &&
+        target !== lastEditor &&
+        target.closest('textarea, input, [contenteditable="true"]')
+      ) {
+        send("context");
+        before = undefined;
+        key = undefined;
+        compositionBase = null;
+        compositionCommit = null;
+      }
+    },
+    options,
+  );
+  document.addEventListener(
     "keydown",
     (e) => {
       if (resolve(e.target))

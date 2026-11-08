@@ -465,3 +465,14 @@ test("every one of the 32 additions has an exercised positive path", () => {
     [],
   );
 });
+test("Pocket Drummer bucket balance does not inherit speed-window gap restrictions", () => {
+  const h = harness();
+  for (const now of [0, 10000, 20000]) h.input(20, { now });
+  h.send("tick", { now: 30000 });
+  assert.ok(h.has("pocket-drummer"));
+  assert.equal(h.has("cruise-control"), false);
+  const n = harness();
+  [20, 20, 19].forEach((count, i) => n.input(count, { now: i * 10000 }));
+  n.send("tick", { now: 30000 });
+  assert.equal(n.has("pocket-drummer"), false);
+});

@@ -16,7 +16,7 @@ Typing effects for bb, in the spirit of VS Code's Power Mode — turned up.
 - Flying letters, red shards on Backspace, shockwave on Enter
 - **Paste ordnance:** pasting drops theme-styled ordnance that scales with the paste, across 9 levels from firecracker to singularity (see below)
 - **Agent Power Mode:** while an agent writes its reply, sparks fly from the newest text, an agent word combo builds ("AGENT IS COOKING" → "AGI ACHIEVED?!"), and a "TURN COMPLETE" finale plays when it finishes. Effects and word counts belong to the thread on screen: a background thread finishing never resets or claims the visible count, and each finale carries its own thread's words and title (turns that were only partly on screen count as turns but not toward best words)
-- **Stats & achievements:** 19 unlockables (combos, WPM, lifetime characters, Night Owl, Theme Tourist, agent cheering…), shown as toasts and in Settings
+- **Stats & achievements:** 51 badges across Human, Agent, and Together, including hidden discoveries. Filter the gallery, follow visible progress, pin a challenge, equip a cosmetic title, and revisit your local session postcard in Settings
 - Optional synth sound
 
 Toggle with the ⚡ button in the sidebar footer or Mod+Alt+P. Tune it under Settings → Power Mode.
@@ -45,3 +45,34 @@ Pasting (or dropping) text drops weapons near the caret. Bigger pastes drop bigg
 - Impacts land at least 60 px from the caret. Intensity scales the explosions and shake; `lightning`, `screen shake`, `sound` and text protection apply as usual.
 - Combo records and achievements count at most +10 per paste, so a single huge paste can't unlock them.
 - Editors that cancel the native paste and insert the text themselves (ProseMirror-style) are detected from the `paste` event.
+
+## Discoveries and personal progress
+
+New speed challenges measure sustained 30-second direct-input windows, rather than
+the HUD’s short burst WPM. Revision and theme challenges reward participation
+without requiring fast typing. Pasted, repeated and unknown-provenance input does
+not establish physical typing speed; committed IME input can count toward
+non-speed challenges. New input challenges observe supported BB composers.
+
+Agent badges record complete replies observed while their thread is visible,
+with an observed start and successful completion—not correctness or solved tasks.
+Together badges follow composer input, accepted submission and a subsequent
+complete reply in the same thread. They describe an observed sequence, not proof
+that a particular draft caused the reply. Interrupted and partial observations
+do not earn full-reply rewards.
+
+Locked discoveries stay anonymous until earned. Visible badges show progress;
+you may pin one beside WPM or equip one small cosmetic title. Speed pins include
+a quiet personal-best ghost. Settings includes a session postcard with bests,
+new discoveries and a next challenge. Sessions end after ten idle minutes or
+reload; persistent badges and counters survive. There are no streak penalties,
+leaderboards or remote achievement analytics. Draft/reply content is not persisted.
+
+Particles can be turned off separately from density. New unlock feedback respects
+sound/effects settings and OS reduced motion, and combines simultaneous badges
+into one toast with a gallery action. The gallery is also available from Power
+Mode’s navigation panel.
+
+The composer adapter relies on BB’s verified internal DOM containers and fails
+closed for unsupported layouts. See [the developer catalog](docs/achievements/catalog.md)
+and [host contract](docs/achievements/host-contract.md) for compatibility details.

@@ -1,15 +1,15 @@
 ## Progress
 
-- [ ] P1 — Validate host event capabilities and document the measurement contract.
-- [ ] P2 — Deliver a compatible catalog and the Six Biomes progress path.
-- [ ] P3 — Deliver sustained speed, rhythm, improvement, and idle-return achievements.
-- [ ] P4 — Deliver draft revision and history achievements.
-- [ ] P5 — Deliver trustworthy complete-reply Agent achievements.
-- [ ] P6 — Deliver composer-to-agent Together achievements.
-- [ ] P7 — Complete hidden discovery rules and make effects-off awards reachable.
-- [ ] P8 — Deliver collection filters, secret-safe cards, and discovery dates.
-- [ ] P9 — Deliver challenge pinning, cosmetic titles, and the session postcard.
-- [ ] P10 — Deliver coalesced accessible celebrations, documentation, and final regression verification.
+- [x] P1 — Validate host event capabilities and document the measurement contract.
+- [x] P2 — Deliver a compatible catalog and the Six Biomes progress path.
+- [x] P3 — Deliver sustained speed, rhythm, improvement, and idle-return achievements.
+- [x] P4 — Deliver draft revision and history achievements.
+- [x] P5 — Deliver trustworthy complete-reply Agent achievements.
+- [x] P6 — Deliver composer-to-agent Together achievements.
+- [x] P7 — Complete hidden discovery rules and make effects-off awards reachable.
+- [x] P8 — Deliver collection filters, secret-safe cards, and discovery dates.
+- [x] P9 — Deliver challenge pinning, cosmetic titles, and the session postcard.
+- [x] P10 — Deliver coalesced accessible celebrations, documentation, and final regression verification.
 
 ## Planning baseline and evidence
 
@@ -129,3 +129,7 @@ Dependencies: P7–P9.
 Issues #10, #11, #13 and #24 were all open when inspected. Recheck their landed interfaces at build start: #10 owns concurrent persistence/reset coordination; #11 owns legacy Night Owl correctness; #13 owns overall motion precedence; #24 owns legacy expand/collapse counting. Preserve or reuse their changes without duplicating those full fixes. New awards must still satisfy their own provenance, replay and static-feedback requirements independently.
 
 Build completion requires all 32 awards reachable from trustworthy supported events, all 51 IDs represented, no secret disclosure before unlock, compatibility/reset verified, and acceptance evidence recorded. Unsupported lifecycle evidence is an explicit implementation dependency, not permission to infer success. No human decision is required to review this plan; the host capability check is the first build gate.
+
+## Build record
+
+Implemented following the approved DOM-adapter decision. See [verification](verification.md) for results and the explicit distinction between fixture/contract tests and live provider or native-IME verification. Implementation was grouped into core rules/adapters and integrated presentation commits because the vertical slices share one reducer and event contract.

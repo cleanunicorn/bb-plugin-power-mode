@@ -19,9 +19,9 @@ Concrete supported sources:
   not separately on chunks. Navigation, expand/collapse and remount cannot produce
   canonical events. Completion without an observed start is partial.
 
-## Unresolved supported-interface dependency
+## Approved internal-DOM compatibility boundary
 
-Input attribution remains a gate: native DOM events expose provenance and ranges,
+The user approved the verified DOM adapter with compatibility tests. native DOM events expose provenance and ranges,
 but the public composer handle has no editor/root DOM reference or input-event
 subscription. `experimental_ComposerRoot.rootRef` belongs to the replacement
 composer renderer, not an observing customization. Host source currently has
@@ -50,24 +50,16 @@ lifecycle is available and is **not** the blocking dependency.
 
 ### Gate disposition
 
-P1 is unresolved for composer input attribution. No achievement implementation
-or permanently ineligible catalog entries have been added. P2 explicitly depends
-on P1 in the approved plan. Decide whether to accept the verified internal-DOM
-adapter as the compatibility boundary for this plugin, or require the public
-host observation extension before continuing. The former avoids expanding this
-repository's work into a host SDK change; the latter preserves a public API-only
-integration. Neither option requires weakening lifecycle or provenance rules.
+The user approved the verified internal DOM adapter with compatibility tests.
+The implementation uses composer-scoped banner markers, excludes queued/terminal
+and unrelated inputs, and fails closed for ambiguous/replacement layouts.
+Canonical agent events come from `useSdk().threads.events.list`; provider RPC
+inspection exposed usage information but no additional input-observation API.
 
-### Validation recorded
-
-- `bb plugin types --check`: original pin 0.6.104 differs from host 0.6.132.
-- Temporarily synchronized declarations with `bb plugin types` and installed
-  with `npm install --ignore-scripts --cache /tmp/power-mode-npm-cache`.
-- `npx tsc --noEmit` passed against 0.6.132; this is an audit baseline only.
-- Restored package manifests and lockfile after the audit; no dependency upgrade
-  is included in this documentation change.
-- No behavioral/browser tests: no runtime implementation changed. P1 adapter
-  fixtures remain pending the interface decision. P1 is not claimed complete.
+The dependency pin is now aligned with the inspected host SDK 0.6.132. See
+`tests/README.md` and `verification.md` for deterministic and browser coverage.
+The original pre-implementation audit was committed as f900513; its pending
+interface decision is resolved, not an outstanding build gate.
 
 ## Measurement decisions
 
