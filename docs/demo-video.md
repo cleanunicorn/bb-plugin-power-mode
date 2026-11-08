@@ -1,6 +1,12 @@
 # Demo video
 
-[`media/power-mode-demo.mp4`](media/power-mode-demo.mp4) is an 84-second, 1280×800 H.264 recording of the real plugin running in bb. It has no audio, because Sound is off by default. [`media/power-mode-demo-poster.jpg`](media/power-mode-demo-poster.jpg) is a still from 0:25, which the README uses as a thumbnail. Both are committed to the repository, so the README link always points at the version on the branch you are viewing.
+[`media/power-mode-demo.mp4`](media/power-mode-demo.mp4) is an 84-second, 1280×800 H.264 recording of the real plugin running in bb. It has no audio, because Sound is off by default. [`media/power-mode-demo-poster.jpg`](media/power-mode-demo-poster.jpg) is a still from 0:25, which the README uses as a thumbnail. Both are committed to the repository.
+
+GitHub's file view doesn't play MP4s inline, so the README links to the committed file through jsDelivr, pinned to the commit that added it:
+
+https://cdn.jsdelivr.net/gh/cleanunicorn/bb-plugin-power-mode@81cac1e19cfeefbdefe92c90ce5973d0f70b509c/docs/media/power-mode-demo.mp4
+
+jsDelivr serves the file as `video/mp4`, so browsers play it directly without signing in.
 
 ## What it shows
 
@@ -50,7 +56,7 @@ The yellow ring is a cursor marker added for the recording. The dark captions ar
    ffmpeg -ss 25 -i power-mode-demo.mp4 -frames:v 1 -vf scale=960:-1 -q:v 4 power-mode-demo-poster.jpg
    ```
 4. Archive the demo thread. Its ID is written to `frames/demo-thread.txt`: `bb thread archive <id>`.
-5. Replace the files in `docs/media/`, update the revision and timings above, and repeat the checks below.
+5. Replace the files in `docs/media/` and commit. Then point the README links at `https://cdn.jsdelivr.net/gh/cleanunicorn/bb-plugin-power-mode@<new commit sha>/docs/media/power-mode-demo.mp4`, using the full SHA of the commit that contains the new file. That commit must reach `main` (this repo merges PRs with merge commits, so branch commits are kept). Update the revision and timings above, and repeat the checks below.
 
 ### Gotchas
 
@@ -61,4 +67,5 @@ The yellow ring is a cursor marker added for the recording. The dark captions ar
 
 - `ffprobe` reports h264, 1280×800, 83.97 s. `ffmpeg -v error -i power-mode-demo.mp4 -f null -` decodes the whole file without errors. SHA-256 `2d519f990410254c26642a1690fb43f6b2edb65d939a86c27b2af9cae6d8c004`.
 - I checked frames from every scene: the toggle click, the combo counter (155 GODLIKE, "ON FIRE!", "NEW RECORD"), Backspace shards, dynamite sticks and the "OVERLOAD" slam, the rocket barrage ("NICE!"), carpet bombing, the Settings page with Inferno selected and the "INFERNO" slam, the agent combo ("AGENT IS COOKING", 117 words), and "TURN COMPLETE". Captions and controls are legible at 1280×800.
+- Unauthenticated playback: a fresh headless Chrome with no cookies opened the jsDelivr URL above. It got HTTP 200 with `video/mp4`, the SHA-256 matched, and a `<video>` element played to the end (`ended: true`, duration 83.97 s, 1280×800, no media error).
 - Privacy: the sidebar thread and project lists and the project picker are blurred, and the demo threads were archived. The workspace-provisioning log is on screen for about a second and shows the local checkout path.

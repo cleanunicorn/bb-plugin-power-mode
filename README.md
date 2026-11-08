@@ -4,9 +4,9 @@ Typing effects for bb, in the spirit of VS Code's Power Mode — turned up.
 
 ## Demo video
 
-[![Power Mode demo: paste ordnance exploding around the bb composer](docs/media/power-mode-demo-poster.jpg)](docs/media/power-mode-demo.mp4)
+[![Power Mode demo: paste ordnance exploding around the bb composer](docs/media/power-mode-demo-poster.jpg)](https://cdn.jsdelivr.net/gh/cleanunicorn/bb-plugin-power-mode@81cac1e19cfeefbdefe92c90ce5973d0f70b509c/docs/media/power-mode-demo.mp4)
 
-▶️ **[Watch the 84-second demo](docs/media/power-mode-demo.mp4)** (MP4, 1280×800, no sound): turning Power Mode on, typing combos, paste ordnance, switching the theme in Settings, and an agent reply through its "TURN COMPLETE" finale. [How it was recorded](docs/demo-video.md).
+▶️ **[Watch the 84-second demo](https://cdn.jsdelivr.net/gh/cleanunicorn/bb-plugin-power-mode@81cac1e19cfeefbdefe92c90ce5973d0f70b509c/docs/media/power-mode-demo.mp4)** (MP4, 1280×800, no sound; [file in the repo](docs/media/power-mode-demo.mp4)): turning Power Mode on, typing combos, paste ordnance, switching the theme in Settings, and an agent reply through its "TURN COMPLETE" finale. [How it was recorded](docs/demo-video.md).
 
 - Particle bursts from the caret, with a soft bloom glow (quarter-resolution, cheap)
 - **Themes:** 🌈 Neon, 🔥 Inferno, 🟩 Matrix (falling code), 🌸 Sakura (drifting petals), 🌃 Cyberpunk, 👾 Retro 8-bit
