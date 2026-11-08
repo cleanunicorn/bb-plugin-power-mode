@@ -129,6 +129,23 @@ s = await stored(A);
 assert(s.chars === 1237 && s.deletes === 5 && s.bestCombo === 40 && s.unlocked['first-spark'] === 111, 'e: legacy merge: ' + JSON.stringify(s));
 assert(!(await toasts(A)).includes('first-spark') && !(await toasts(B)).includes('first-spark'), 'e: no duplicate notification for stored unlock');
 
+// (g) typing that crosses no threshold never touches storage; a queued flush's promise resolves after the write.
+await both();
+await record(A, 1); await flush(A); // first-spark already claimed
+const probe = await A.evaluate(async () => {
+  let reads = 0;
+  const get = Storage.prototype.getItem;
+  Storage.prototype.getItem = function (...a) { reads++; return get.apply(this, a); };
+  for (let i = 0; i < 50; i++) PowerTest.recordStats(s => ({ ...s, chars: s.chars + 1 }));
+  const during = reads;
+  const p1 = PowerTest.flushPowerStats(), p2 = PowerTest.flushPowerStats();
+  await p2;
+  Storage.prototype.getItem = get;
+  return { during, written: JSON.parse(localStorage.getItem('bb-plugin-power-mode:power-mode:stats')).chars, same: p1 === p2 };
+});
+assert(probe.during === 0, 'g: recordStats read storage ' + probe.during + ' times');
+assert(probe.written === 51, 'g: second flushPowerStats resolved before the write: ' + probe.written);
+
 // (f) cleared storage is an empty document with a new epoch for other windows.
 await A.evaluate(k => localStorage.removeItem(k), KEY);
 await until('f: storage clear reached B', () => get(B), s => s.chars === 0);

@@ -106,7 +106,7 @@ let epoch = "";
 let loaded = false;
 let dirty = false;
 let saveTimer = 0;
-let flushQueued = false;
+let flushQueued: Promise<void> | null = null;
 /** A local reset whose write has not reached storage yet. */
 let pendingReset = false;
 /** Local unlocks waiting for the locked flush to confirm no other window claimed them first. */
@@ -251,17 +251,15 @@ function requestFlush(): Promise<void> {
     flushNow();
     return Promise.resolve();
   }
-  if (flushQueued) return Promise.resolve();
-  flushQueued = true;
-  return locks
-    .request(powerStorageKey(LOCK_NAME), () => {
-      flushQueued = false;
-      flushNow();
-    })
-    .catch(() => {
-      flushQueued = false;
-      flushNow();
-    });
+  if (flushQueued) return flushQueued; // resolves once the pending flush has written
+  const run = () => {
+    flushQueued = null;
+    flushNow();
+  };
+  flushQueued = locks.request(powerStorageKey(LOCK_NAME), run).catch(() => {
+    if (flushQueued) run();
+  });
+  return flushQueued;
 }
 
 function scheduleSave() {
@@ -293,6 +291,9 @@ function onStorage(e: StorageEvent) {
 }
 
 function checkAchievements() {
+  // Cheap in-memory pre-check: typing must not touch storage unless something unlocks.
+  const ctx = { hour: new Date().getHours() };
+  if (!ACHIEVEMENTS.some((a) => !stats.unlocked[a.id] && a.check(stats, ctx))) return;
   const stored = pendingReset ? { stats: EMPTY_STATS, epoch } : readDoc();
   const prior = stored.epoch === epoch ? stored.stats.unlocked : {};
   if (claimUnlocks(prior, true)) {
