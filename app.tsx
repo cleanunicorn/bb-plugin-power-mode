@@ -381,6 +381,9 @@ function Stat({ label, value }: { label: string; value: string | number }) {
   );
 }
 
+const SELECT_CLASS =
+  "h-8 rounded-md border border-input bg-background px-2 text-sm shadow-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring";
+
 export function StatsAndAchievements() {
   const stats = usePowerStats();
   const [category, setCategory] = useState("All");
@@ -418,10 +421,11 @@ export function StatsAndAchievements() {
         Agent badges record observed activity. They do not judge correctness or
         task success. A session ends after ten idle minutes or reload.
       </p>
-      <div className="flex flex-wrap gap-3">
-        <label>
-          Collection{" "}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+        <label className="flex items-center gap-2">
+          <span className="text-muted-foreground">Collection</span>
           <select
+            className={SELECT_CLASS}
             value={category}
             onChange={(e) => setCategory(e.target.value)}
           >
@@ -430,17 +434,17 @@ export function StatsAndAchievements() {
             ))}
           </select>
         </label>
-        <label>
-          <input
-            type="checkbox"
+        <label className="flex items-center gap-2">
+          <Checkbox
             checked={onlyUnlocked}
-            onChange={(e) => setOnlyUnlocked(e.target.checked)}
-          />{" "}
+            onCheckedChange={(v) => setOnlyUnlocked(v === true)}
+          />
           Unlocked only
         </label>
-        <label>
-          HUD title{" "}
+        <label className="flex items-center gap-2">
+          <span className="text-muted-foreground">HUD title</span>
           <select
+            className={SELECT_CLASS}
             value={
               titles.includes(collection.saved.title ?? "")
                 ? (collection.saved.title ?? "")
@@ -490,11 +494,17 @@ export function StatsAndAchievements() {
             return (
               <li
                 key={a.id}
-                className="rounded-lg border border-dashed px-3 py-2 text-sm"
+                className="flex items-center gap-3 rounded-lg border border-dashed border-border px-3 py-2"
               >
-                <span aria-hidden="true">◇ </span>
-                <strong>Undiscovered</strong>
-                <p>A discovery awaits.</p>
+                <span className="text-2xl opacity-55" aria-hidden>
+                  ◇
+                </span>
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold">Undiscovered</div>
+                  <div className="text-xs text-muted-foreground">
+                    A discovery awaits.
+                  </div>
+                </div>
               </li>
             );
           return (
