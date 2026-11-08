@@ -1,6 +1,7 @@
 // Power Mode preferences, shared by the effects engine (content script) and
-// the settings UI. Stored per browser window in localStorage, keyed by the
-// plugin id, and synced across tabs through the `storage` event.
+// the settings UI. Stored in the bb origin's localStorage (shared by every
+// window in a browser profile), keyed by the plugin id, and synced across open
+// windows through the `storage` event.
 
 export type Intensity = "epic" | "legendary" | "godlike";
 export type ThemeId = "neon" | "fire" | "matrix" | "sakura" | "cyberpunk" | "retro";
@@ -8,6 +9,7 @@ export const THEME_IDS: readonly ThemeId[] = ["neon", "fire", "matrix", "sakura"
 
 export interface PowerSettings {
   enabled: boolean;
+  particles: boolean;
   intensity: Intensity;
   shake: boolean;
   screenShake: boolean;
@@ -24,10 +26,17 @@ export interface PowerSettings {
   /** Bloom strength, 0–1 (0 turns the bloom layer off). */
   glow: number;
   bestCombo: number;
+  /**
+   * Reduce motion: no shake, no full-screen flashes, no lightning. `null`
+   * follows the OS `prefers-reduced-motion` setting; `true`/`false` is an
+   * explicit user override that wins over the OS from then on.
+   */
+  reduceMotion: boolean | null;
 }
 
 export const DEFAULT_SETTINGS: PowerSettings = {
   enabled: false,
+  particles: true,
   intensity: "legendary",
   shake: true,
   screenShake: true,
@@ -40,6 +49,7 @@ export const DEFAULT_SETTINGS: PowerSettings = {
   density: 1,
   glow: 0.7,
   bestCombo: 0,
+  reduceMotion: null,
 };
 
 export const DENSITY_RANGE = { min: 0.25, max: 3 } as const;
@@ -68,6 +78,7 @@ function parse(raw: string | null): PowerSettings {
     const best = typeof v.bestCombo === "number" && Number.isFinite(v.bestCombo) ? Math.max(0, Math.floor(v.bestCombo)) : 0;
     return {
       enabled: bool("enabled"),
+      particles: bool("particles"),
       intensity: INTENSITIES.includes(v.intensity as Intensity) ? (v.intensity as Intensity) : DEFAULT_SETTINGS.intensity,
       shake: bool("shake"),
       screenShake: bool("screenShake"),
@@ -80,6 +91,7 @@ function parse(raw: string | null): PowerSettings {
       density: num("density", DENSITY_RANGE.min, DENSITY_RANGE.max),
       glow: num("glow", 0, 1),
       bestCombo: best,
+      reduceMotion: typeof v.reduceMotion === "boolean" ? v.reduceMotion : null,
     };
   } catch {
     return DEFAULT_SETTINGS;
@@ -114,6 +126,44 @@ export function watchExternalChanges(signal: AbortSignal) {
     },
     { signal },
   );
+}
+
+const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)";
+
+function systemMedia(): MediaQueryList | null {
+  try {
+    return typeof window.matchMedia === "function" ? window.matchMedia(REDUCED_MOTION_QUERY) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The OS-level `prefers-reduced-motion: reduce` value, read live (never persisted). */
+export function getSystemReducedMotion(): boolean {
+  return systemMedia()?.matches === true;
+}
+
+/** Effective value: the explicit override if the user chose one, else the OS preference. */
+export function getReducedMotion(): boolean {
+  return state.reduceMotion ?? getSystemReducedMotion();
+}
+
+/** Notifies subscribers when the OS motion preference changes. */
+export function watchSystemMotion(signal: AbortSignal) {
+  const media = systemMedia();
+  if (!media) return;
+  media.addEventListener("change", () => emit(), { signal });
+}
+
+/**
+ * `useSyncExternalStore`-style subscription to the OS motion preference, for UI
+ * that shows the effective value (the settings snapshot does not change on an OS flip).
+ */
+export function subscribeSystemMotion(listener: () => void) {
+  const media = systemMedia();
+  if (!media) return () => {};
+  media.addEventListener("change", listener);
+  return () => media.removeEventListener("change", listener);
 }
 
 export function getPowerSettings(): PowerSettings {

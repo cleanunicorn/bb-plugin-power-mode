@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Typecheck and unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build:test
+      - run: npm run test:unit
+      # Node's built-in runner suites (achievement reducer/adapters, docs counts);
+      # the achievement suites need Node 24+.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm run test:node
+
+  browser:
+    name: Browser regression fixtures
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # The betterwright CLI's shebang is `env bun`; the runner has no bun.
+      - uses: oven-sh/setup-bun@v2
+      # BetterWright downloads its managed Chromium; no account, profile or
+      # external service is needed. The runner's kernel policy blocks Chromium's
+      # setuid sandbox, so the sandbox is disabled for this throwaway job.
+      - run: npx betterwright setup
+      - run: npm run test:browser
+        env:
+          BETTERWRIGHT_CHROMIUM_ARGS: --no-sandbox

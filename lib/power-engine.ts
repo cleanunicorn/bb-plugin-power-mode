@@ -16,13 +16,16 @@
 import { toast } from "sonner";
 import {
   getPowerSettings,
+  getReducedMotion,
   subscribePowerSettings,
   updatePowerSettings,
   watchExternalChanges,
+  watchSystemMotion,
   type Intensity,
   type PowerSettings,
 } from "./power-store";
-import { flushPowerStats, recordStats, setUnlockHandler, type Achievement } from "./power-stats";
+import { hudChallenge } from "./achievement-presentation";
+import { onCollectionReset, getPowerStats, subscribePowerStats, flushPowerStats, recordStats, setUnlockHandler, type Achievement } from "./power-stats";
 import { ORDNANCE_SKINS, THEMES, type OrdnanceSkin, type OrdnanceSound, type Theme } from "./power-themes";
 
 // ---------------------------------------------------------------- tuning
@@ -743,6 +746,11 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
   const hudCount = hud.querySelector<HTMLElement>(".pm-hud-count")!;
   const hudTier = hud.querySelector<HTMLElement>(".pm-hud-tier")!;
   const hudWpm = hud.querySelector<HTMLElement>(".pm-hud-wpm")!;
+  const challenge=document.createElement("div");challenge.className="pm-hud-wpm pm-hud-challenge";
+  challenge.style.cssText="font-size:11px;max-width:260px;line-height:1.5;letter-spacing:normal";
+  hudWpm.after(challenge);
+  const updateChallenge=()=>{challenge.textContent=hudChallenge(getPowerStats());challenge.hidden=!challenge.textContent;};
+  const unsubscribeChallenge=subscribePowerStats(updateChallenge);updateChallenge();
   const hudFill = hud.querySelector<HTMLElement>(".pm-hud-fill")!;
 
   const vignette = document.createElement("div");
@@ -811,7 +819,7 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
   let quality = 1;
   let frameEma = 16.7;
 
-  const maxParticles = () => Math.round(Math.min(1200, Math.max(150, BASE_MAX_PARTICLES * settings.density)));
+  const maxParticles = () => !settings.particles ? 0 : Math.round(Math.min(1200, Math.max(150, BASE_MAX_PARTICLES * settings.density)));
   const bloomOn = () => theme.bloom && settings.glow > 0.01;
 
   function setTheme(target: HTMLElement, hue: number) {
@@ -950,6 +958,7 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
   }
 
   function bolt(x: number, y: number, hue: number) {
+    if (getReducedMotion()) return;
     if (particles.length >= maxParticles()) return;
     const points: number[] = [];
     let px = x + rand(-260, 260);
@@ -968,6 +977,7 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
   // ---- shake (editor translation, viewport-safe page offsets)
 
   function shakeElement(el: HTMLElement, amp: number) {
+    if (getReducedMotion()) return;
     const existing = shakes.get(el);
     if (existing) {
       existing.amp = Math.min(Math.max(existing.amp, amp), 12);
@@ -1026,6 +1036,8 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
   }
 
   function flash(hue: number, x = window.innerWidth / 2, y = window.innerHeight / 2, big = false) {
+    // Reduced motion: no full-viewport flashes at all (the big one is a white-out).
+    if (getReducedMotion()) return;
     for (const el of transient) {
       if (!el.classList.contains("pm-flash")) continue;
       if (!big) return; // one at a time; a big (white-out) flash replaces it
@@ -1573,16 +1585,24 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
 
   // ---- achievements
 
+  const unlockBatch: Achievement[]=[];
+  let unlockTimer=0;
+  const unresetUnlock=onCollectionReset(()=>{window.clearTimeout(unlockTimer);unlockTimer=0;unlockBatch.length=0;});
   function onUnlock(a: Achievement) {
-    toast(`${a.icon}  Achievement unlocked: ${a.title}`, { description: a.description });
-    if (!settings.enabled) return;
-    attach();
-    const x = window.innerWidth - 120;
-    const y = 90;
-    burst(x, y, 48, 60, 8, "spark");
-    ring(x, y, 48, 160, 600);
-    if (settings.sound) synth.chime();
-    start();
+    unlockBatch.push(a);
+    if(unlockTimer)return;
+    unlockTimer=window.setTimeout(()=>{
+      unlockTimer=0;const batch=unlockBatch.splice(0),first=batch[0];if(!first)return;
+      const copy={Human:"Finding your groove",Agent:"Co-pilot sighted",Together:"A lovely exchange"}[first.category];
+      toast(`${first.icon} ${copy}: ${batch.length===1?first.title:`${batch.length} achievements unlocked`}`, {
+        description:batch.length===1?(first.flavor??first.description):"Your collection has new stories.",
+        action:{label:"View gallery",onClick:()=>window.dispatchEvent(new Event("power-mode:gallery"))},
+      });
+      if(!settings.enabled||getReducedMotion())return;
+      const hue={Human:48,Agent:190,Together:300}[first.category];
+      if(settings.particles){attach();burst(window.innerWidth-120,90,first.category==="Agent"?24:36,hue,6,"spark");ring(window.innerWidth-120,90,hue,first.category==="Together"?100:70,450);start();}
+      if(settings.sound)synth.chime();
+    },150);
   }
   setUnlockHandler(onUnlock);
 
@@ -1732,7 +1752,7 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
       pastes: s.pastes + (pasted ? 1 : 0),
       bestCombo: Math.max(s.bestCombo, earned),
       bestWpm: keyLog.length >= 15 ? Math.max(s.bestWpm, speed) : s.bestWpm,
-    }));
+    }), { typed: typed > 0 });
     start();
   }
   document.addEventListener("input", onInput, { capture: true, signal });
@@ -1741,6 +1761,31 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
 
   const rowTexts = new WeakMap<Element, string>();
   const wordCount = (text: string) => (text.match(/\S+/gu) ?? []).length;
+  // BB's command approval preview renders only the first four lines while
+  // collapsed. Count that stable prefix in either state; its remaining lines
+  // are not available in the DOM when collapsed.
+  function agentRowText(row: Element): string {
+    const walker = document.createTreeWalker(row, NodeFilter.SHOW_TEXT);
+    let text = "";
+    const seenPreviews = new Set<Element>();
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const preview = node.parentElement?.closest('[data-testid="command-preview"]');
+      const child = preview && node.parentElement?.closest("pre, button");
+      if (preview && child?.parentElement === preview) {
+        if (child.matches("pre") && !seenPreviews.has(child)) {
+          seenPreviews.add(child);
+          text += (child.textContent ?? "").split("\n").slice(0, 4).join("\n");
+        }
+        continue;
+      }
+      // Other timeline controls use CSS clamping, so their full content is
+      // already present and only the control label needs to be excluded.
+      const control = node.parentElement?.closest('button[aria-expanded]');
+      if (control && row.contains(control) && /^(Show more|Show less)$/.test(control.textContent?.trim() ?? "")) continue;
+      text += node.textContent ?? "";
+    }
+    return text;
+  }
   const touched = new Map<HTMLElement, Node>();
   let agentFlushTimer = 0;
   let observing = false;
@@ -1805,14 +1850,14 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
       if (!turn) agentTurns.set(creditId, (turn = { words: 0, milestone: 0, partial: true }));
     }
     if (!turn) {
-      for (const row of touched.keys()) rowTexts.set(row, row.textContent ?? "");
+      for (const row of touched.keys()) rowTexts.set(row, agentRowText(row));
       touched.clear();
       return;
     }
     let totalDelta = 0;
     let wordDelta = 0;
     for (const [row, node] of touched) {
-      const text = row.textContent ?? "";
+      const text = agentRowText(row);
       const previous = rowTexts.get(row) ?? "";
       rowTexts.set(row, text);
       const delta = text.length - previous.length;
@@ -1867,7 +1912,7 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
     observing = want;
     if (want) {
       document.querySelectorAll("[data-timeline-items] [data-timeline-row-id]").forEach((row) => {
-        rowTexts.set(row, row.textContent ?? "");
+        rowTexts.set(row, agentRowText(row));
       });
       observer.observe(document.body, { subtree: true, childList: true, characterData: true });
     } else {
@@ -2666,6 +2711,7 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
   function onSettings() {
     const next = getPowerSettings();
     const was = settings.enabled;
+    if (!next.particles) { particles=[]; glyphCount=0; }
     const themeChanged = next.theme !== settings.theme;
     settings = next;
     theme = THEMES[next.theme];
@@ -2674,10 +2720,17 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
     // Discard stale bloom pixels before changing layer visibility. Redraw even
     // when the engine was idle when a visual setting changed.
     clearCanvases();
-    if (!next.shake || !next.screenShake) {
+    const reduced = getReducedMotion();
+    if (reduced || !next.shake || !next.screenShake) {
       for (const [el, state] of shakes) {
-        if (el === document.body ? !next.screenShake : !next.shake) releaseShake(el, state);
+        if (reduced || (el === document.body ? !next.screenShake : !next.shake)) releaseShake(el, state);
       }
+    }
+    if (reduced) {
+      for (const el of transient) {
+        if (el.classList.contains("pm-flash")) { el.remove(); transient.delete(el); }
+      }
+      particles = particles.filter((p) => p.kind !== "bolt");
     }
     if (next.enabled) start();
     updateObserver();
@@ -2722,6 +2775,7 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
   }
   const unsubscribe = subscribePowerSettings(onSettings);
   watchExternalChanges(signal);
+  watchSystemMotion(signal);
   if (settings.enabled) attach();
   updateObserver();
 
@@ -2736,6 +2790,10 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
     if (modeCheck) cancelAnimationFrame(modeCheck);
     agentHooks = null;
     setUnlockHandler(null);
+    unsubscribeChallenge();
+    unresetUnlock();
+    window.clearTimeout(unlockTimer);
+    unlockBatch.length=0;
     flushPowerStats();
     if (raf) cancelAnimationFrame(raf);
     if (agentFlushTimer) window.clearTimeout(agentFlushTimer);
