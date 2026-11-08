@@ -8,6 +8,7 @@ export const THEME_IDS: readonly ThemeId[] = ["neon", "fire", "matrix", "sakura"
 
 export interface PowerSettings {
   enabled: boolean;
+  particles: boolean;
   intensity: Intensity;
   shake: boolean;
   screenShake: boolean;
@@ -28,6 +29,7 @@ export interface PowerSettings {
 
 export const DEFAULT_SETTINGS: PowerSettings = {
   enabled: false,
+  particles: true,
   intensity: "legendary",
   shake: true,
   screenShake: true,
@@ -68,6 +70,7 @@ function parse(raw: string | null): PowerSettings {
     const best = typeof v.bestCombo === "number" && Number.isFinite(v.bestCombo) ? Math.max(0, Math.floor(v.bestCombo)) : 0;
     return {
       enabled: bool("enabled"),
+      particles: bool("particles"),
       intensity: INTENSITIES.includes(v.intensity as Intensity) ? (v.intensity as Intensity) : DEFAULT_SETTINGS.intensity,
       shake: bool("shake"),
       screenShake: bool("screenShake"),

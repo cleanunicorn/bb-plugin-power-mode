@@ -22,7 +22,8 @@ import {
   type Intensity,
   type PowerSettings,
 } from "./power-store";
-import { flushPowerStats, recordStats, setUnlockHandler, type Achievement } from "./power-stats";
+import { hudChallenge } from "./achievement-presentation";
+import { onCollectionReset, getPowerStats, subscribePowerStats, flushPowerStats, recordStats, setUnlockHandler, type Achievement } from "./power-stats";
 import { ORDNANCE_SKINS, THEMES, type OrdnanceSkin, type OrdnanceSound, type Theme } from "./power-themes";
 
 // ---------------------------------------------------------------- tuning
@@ -743,6 +744,11 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
   const hudCount = hud.querySelector<HTMLElement>(".pm-hud-count")!;
   const hudTier = hud.querySelector<HTMLElement>(".pm-hud-tier")!;
   const hudWpm = hud.querySelector<HTMLElement>(".pm-hud-wpm")!;
+  const challenge=document.createElement("div");challenge.className="pm-hud-wpm pm-hud-challenge";
+  challenge.style.cssText="font-size:11px;max-width:260px;line-height:1.5;letter-spacing:normal";
+  hudWpm.after(challenge);
+  const updateChallenge=()=>{challenge.textContent=hudChallenge(getPowerStats());challenge.hidden=!challenge.textContent;};
+  const unsubscribeChallenge=subscribePowerStats(updateChallenge);updateChallenge();
   const hudFill = hud.querySelector<HTMLElement>(".pm-hud-fill")!;
 
   const vignette = document.createElement("div");
@@ -811,7 +817,7 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
   let quality = 1;
   let frameEma = 16.7;
 
-  const maxParticles = () => Math.round(Math.min(1200, Math.max(150, BASE_MAX_PARTICLES * settings.density)));
+  const maxParticles = () => !settings.particles ? 0 : Math.round(Math.min(1200, Math.max(150, BASE_MAX_PARTICLES * settings.density)));
   const bloomOn = () => theme.bloom && settings.glow > 0.01;
 
   function setTheme(target: HTMLElement, hue: number) {
@@ -1573,16 +1579,24 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
 
   // ---- achievements
 
+  const unlockBatch: Achievement[]=[];
+  let unlockTimer=0;
+  const unresetUnlock=onCollectionReset(()=>{window.clearTimeout(unlockTimer);unlockTimer=0;unlockBatch.length=0;});
   function onUnlock(a: Achievement) {
-    toast(`${a.icon}  Achievement unlocked: ${a.title}`, { description: a.description });
-    if (!settings.enabled) return;
-    attach();
-    const x = window.innerWidth - 120;
-    const y = 90;
-    burst(x, y, 48, 60, 8, "spark");
-    ring(x, y, 48, 160, 600);
-    if (settings.sound) synth.chime();
-    start();
+    unlockBatch.push(a);
+    if(unlockTimer)return;
+    unlockTimer=window.setTimeout(()=>{
+      unlockTimer=0;const batch=unlockBatch.splice(0),first=batch[0];if(!first)return;
+      const copy={Human:"Finding your groove",Agent:"Co-pilot sighted",Together:"A lovely exchange"}[first.category];
+      toast(`${first.icon} ${copy}: ${batch.length===1?first.title:`${batch.length} achievements unlocked`}`, {
+        description:batch.length===1?(first.flavor??first.description):"Your collection has new stories.",
+        action:{label:"View gallery",onClick:()=>window.dispatchEvent(new Event("power-mode:gallery"))},
+      });
+      if(!settings.enabled||window.matchMedia?.("(prefers-reduced-motion: reduce)").matches)return;
+      const hue={Human:48,Agent:190,Together:300}[first.category];
+      if(settings.particles){attach();burst(window.innerWidth-120,90,first.category==="Agent"?24:36,hue,6,"spark");ring(window.innerWidth-120,90,hue,first.category==="Together"?100:70,450);start();}
+      if(settings.sound)synth.chime();
+    },150);
   }
   setUnlockHandler(onUnlock);
 
@@ -2666,6 +2680,7 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
   function onSettings() {
     const next = getPowerSettings();
     const was = settings.enabled;
+    if (!next.particles) { particles=[]; glyphCount=0; }
     const themeChanged = next.theme !== settings.theme;
     settings = next;
     theme = THEMES[next.theme];
@@ -2736,6 +2751,10 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
     if (modeCheck) cancelAnimationFrame(modeCheck);
     agentHooks = null;
     setUnlockHandler(null);
+    unsubscribeChallenge();
+    unresetUnlock();
+    window.clearTimeout(unlockTimer);
+    unlockBatch.length=0;
     flushPowerStats();
     if (raf) cancelAnimationFrame(raf);
     if (agentFlushTimer) window.clearTimeout(agentFlushTimer);
