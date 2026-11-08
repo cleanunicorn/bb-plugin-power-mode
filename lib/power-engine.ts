@@ -1732,7 +1732,7 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
       pastes: s.pastes + (pasted ? 1 : 0),
       bestCombo: Math.max(s.bestCombo, earned),
       bestWpm: keyLog.length >= 15 ? Math.max(s.bestWpm, speed) : s.bestWpm,
-    }));
+    }), { typed: typed > 0 });
     start();
   }
   document.addEventListener("input", onInput, { capture: true, signal });

@@ -38,8 +38,24 @@ export interface Achievement {
   icon: string;
   title: string;
   description: string;
-  check(stats: PowerStats, ctx: { hour: number }): boolean;
+  check(stats: PowerStats, ctx: AchievementContext): boolean;
 }
+
+/** What triggered an achievement check, beyond the stats themselves. */
+export interface AchievementContext {
+  /** Local hour of day (0-23) when the check runs. */
+  hour: number;
+  /** True only when this check follows a keystroke that added typed characters. */
+  typed: boolean;
+}
+
+/** Describes the event behind a `recordStats` call. */
+export interface StatsEvent {
+  typed?: boolean;
+}
+
+/** Night Owl window: 00:00 inclusive to 04:00 exclusive, local time. */
+export const NIGHT_OWL_END_HOUR = 4;
 
 export const ACHIEVEMENTS: Achievement[] = [
   { id: "first-spark", icon: "✨", title: "First Spark", description: "Type with Power Mode on.", check: (s) => s.chars >= 1 },
@@ -56,7 +72,7 @@ export const ACHIEVEMENTS: Achievement[] = [
   { id: "wpm-140", icon: "🚀", title: "Lightspeed", description: "Hit 140 WPM.", check: (s) => s.bestWpm >= 140 },
   { id: "deletes-500", icon: "🧽", title: "Second Thoughts", description: "Delete 500 characters.", check: (s) => s.deletes >= 500 },
   { id: "pastes-25", icon: "📋", title: "Ctrl+V Warrior", description: "Paste 25 times.", check: (s) => s.pastes >= 25 },
-  { id: "night-owl", icon: "🦉", title: "Night Owl", description: "Type between midnight and 4 AM.", check: (s, c) => s.chars > 0 && c.hour < 4 },
+  { id: "night-owl", icon: "🦉", title: "Night Owl", description: "Type between midnight and 4 AM.", check: (_s, c) => c.typed && c.hour >= 0 && c.hour < NIGHT_OWL_END_HOUR },
   { id: "agent-hype", icon: "📣", title: "Hype Man", description: "Cheer on an agent through 1,000 characters.", check: (s) => s.agentChars >= 1_000 },
   { id: "agent-500", icon: "🤝", title: "Pair Programmer", description: "Watch an agent write 500 words in one reply.", check: (s) => s.bestAgentWords >= 500 },
   { id: "agent-turns-25", icon: "🎬", title: "Director", description: "See 25 agent turns finish.", check: (s) => s.agentTurns >= 25 },
@@ -134,8 +150,8 @@ function scheduleSave() {
   if (!saveTimer) saveTimer = window.setTimeout(flush, 2000);
 }
 
-function checkAchievements() {
-  const ctx = { hour: new Date().getHours() };
+function checkAchievements(event: StatsEvent) {
+  const ctx: AchievementContext = { hour: new Date().getHours(), typed: event.typed === true };
   let unlockedAny = false;
   for (const a of ACHIEVEMENTS) {
     if (stats.unlocked[a.id] || !a.check(stats, ctx)) continue;
@@ -149,12 +165,16 @@ function checkAchievements() {
   }
 }
 
-/** Apply a change to the stats, then check for newly unlocked achievements. */
-export function recordStats(mutate: (s: PowerStats) => PowerStats) {
+/**
+ * Apply a change to the stats, then check for newly unlocked achievements.
+ * `event` says what caused the change; event-bound achievements (Night Owl)
+ * only unlock when their event is present.
+ */
+export function recordStats(mutate: (s: PowerStats) => PowerStats, event: StatsEvent = {}) {
   ensureLoaded();
   stats = mutate(stats);
   scheduleSave();
-  checkAchievements();
+  checkAchievements(event);
 }
 
 export function getPowerStats(): PowerStats {
