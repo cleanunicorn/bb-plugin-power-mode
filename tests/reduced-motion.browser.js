@@ -182,6 +182,23 @@ const result = await page.evaluate(async () => {
   window.dispatchEvent(new StorageEvent('storage', { key: 'bb-plugin-power-mode:power-mode:settings', newValue: '{"enabled":true,"reduceMotion":true}' }));
   assert(T.getPowerSettings().reduceMotion === true && T.getReducedMotion(), 'Stored true is read back');
 
+  // ---- UI subscription: the settings snapshot is unchanged by an OS flip, so the
+  // settings page re-renders through subscribeSystemMotion + getSystemReducedMotion.
+  setOsReduced(false);
+  T.updatePowerSettings({ reduceMotion: null });
+  const snapshot = T.getPowerSettings();
+  let uiNotified = 0;
+  const unsubscribeUi = T.subscribeSystemMotion(() => uiNotified++);
+  setOsReduced(true);
+  assert(uiNotified === 1 && T.getSystemReducedMotion() === true, 'UI subscription sees the OS flip and the new value');
+  assert(T.getPowerSettings() === snapshot, 'Settings snapshot is unchanged by an OS flip (why the UI needs its own subscription)');
+  setOsReduced(false);
+  assert(uiNotified === 2 && T.getSystemReducedMotion() === false, 'UI subscription sees the flip back');
+  unsubscribeUi();
+  setOsReduced(true);
+  assert(uiNotified === 2, 'Unsubscribed UI listener is not called');
+  setOsReduced(false);
+
   // ---- dispose removes the OS listener (no leak, no throw on later flips)
   controller.abort();
   setOsReduced(false);

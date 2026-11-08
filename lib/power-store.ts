@@ -151,6 +151,17 @@ export function watchSystemMotion(signal: AbortSignal) {
   media.addEventListener("change", () => emit(), { signal });
 }
 
+/**
+ * `useSyncExternalStore`-style subscription to the OS motion preference, for UI
+ * that shows the effective value (the settings snapshot does not change on an OS flip).
+ */
+export function subscribeSystemMotion(listener: () => void) {
+  const media = systemMedia();
+  if (!media) return () => {};
+  media.addEventListener("change", listener);
+  return () => media.removeEventListener("change", listener);
+}
+
 export function getPowerSettings(): PowerSettings {
   return state;
 }

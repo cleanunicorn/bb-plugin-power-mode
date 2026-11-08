@@ -18,10 +18,10 @@ import {
   DENSITY_RANGE,
   THEME_IDS,
   getPowerSettings,
-  getReducedMotion,
   getSystemReducedMotion,
   initPowerStore,
   subscribePowerSettings,
+  subscribeSystemMotion,
   updatePowerSettings,
   type Intensity,
   type PowerSettings,
@@ -82,8 +82,9 @@ function Row({ children }: { children: ReactNode }) {
 }
 
 function ReduceMotion({ settings }: { settings: PowerSettings }) {
-  const system = getSystemReducedMotion();
-  const effective = getReducedMotion();
+  // Re-render on OS flips: the settings snapshot itself does not change then.
+  const system = useSyncExternalStore(subscribeSystemMotion, getSystemReducedMotion, () => false);
+  const effective = settings.reduceMotion ?? system;
   const overridden = settings.reduceMotion !== null;
   return (
     <Row>
