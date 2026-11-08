@@ -1,18 +1,42 @@
-Browser regression fixture for the effects engine. Build the fixture with esbuild
-(available in BB's plugin toolchain or through `npm exec --package=esbuild`):
+## Running the tests
 
 ```sh
-esbuild tests/power-engine-entry.ts --bundle --format=iife --global-name=PowerTest --alias:sonner=./tests/toast-stub.ts --outfile=/tmp/power-regression/engine.js
-cp tests/power-engine.html /tmp/power-regression/
-python3 -m http.server 9146 --bind 127.0.0.1 --directory /tmp/power-regression
+npm ci
+npm run typecheck     # tsc over the plugin sources
+npm run test:unit     # vitest: lib/power-store and lib/power-stats (tests/unit)
+npm run test:browser  # all tests/*.browser.js fixtures, end to end
+npm test              # unit + browser
 ```
 
-In another terminal:
+`npm run test:browser` runs `scripts/run-browser-tests.mjs`. It bundles the fixture
+with esbuild into `dist/test-site` (`npm run build:test`), serves it on
+`127.0.0.1:9146` (the URL the fixtures hard-code), runs every `*.browser.js` file
+through BetterWright with a dedicated `power-mode-tests` profile, and stops the server
+afterwards, including on failure and on SIGINT/SIGTERM. It exits non-zero if any
+fixture fails, if port 9146 is taken, or if BetterWright's browser is missing.
 
-```sh
-betterwright run --no-daemon tests/power-engine.browser.js
-betterwright run --no-daemon tests/paste-ordnance.browser.js
-```
+First run on a machine: `npx betterwright setup` downloads the managed Chromium.
+If Chromium aborts with "The SUID sandbox helper binary was found, but is not
+configured correctly" (common in containers and on recent Ubuntu), run with
+`BETTERWRIGHT_CHROMIUM_ARGS=--no-sandbox npm run test:browser`.
+
+BetterWright 2.9.1 cannot parse a snippet that starts with `await`, so the runner
+runs a copy of each fixture with a leading declaration (written to `dist/snippets`).
+The fixtures themselves are untouched and also run with `betterwright run` directly
+once the site is served.
+
+### CI
+
+`.github/workflows/ci.yml` runs on pull requests and pushes to `main`:
+
+- `checks`: typecheck, test-site build and unit tests.
+- `browser`: `betterwright setup` then `npm run test:browser` with
+  `--no-sandbox`. BetterWright needs no sign-in, profile or external service, only the
+  download of its managed Chromium. This was verified locally; the workflow itself
+  can only be proven by its first run on GitHub. If it turns out to be blocked there,
+  the `checks` job still runs and the failing `browser` job names the blocker.
+
+## Fixtures
 
 The test advances animation frames deterministically. It checks that typing and
 paste keep viewport panels fixed, existing editor translations survive shake,
