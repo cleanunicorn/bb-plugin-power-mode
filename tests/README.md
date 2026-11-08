@@ -63,6 +63,15 @@ theme changes or other stats mutations does not unlock it; a nighttime deletion
 or paste does not count as typing; and an existing unlock is preserved. Run it
 with the other browser tests (`betterwright run --no-daemon tests/night-owl.browser.js`).
 
+`reduced-motion.browser.js` covers reduced motion (#13) with a controllable
+`matchMedia` stub: the OS value is followed until an explicit override is saved,
+overrides (true and false) win over OS changes and persist, legacy or untrusted
+saved values parse to "follow the OS", tier 7–9 pastes, combo milestones, typing
+and power-on produce no body/editor shake and no `.pm-flash`, an OS flip
+mid-event releases live shakes and flashes, normal effects return when reduction
+is off, and disposal removes the listener. Lightning is gated in `bolt()` but not
+asserted directly.
+
 ## Achievement collection (#32)
 
 Node 24+ runs the pure reducer and adapter contract suites without a test runtime:

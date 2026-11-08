@@ -26,8 +26,10 @@ import {
   DENSITY_RANGE,
   THEME_IDS,
   getPowerSettings,
+  getSystemReducedMotion,
   initPowerStore,
   subscribePowerSettings,
+  subscribeSystemMotion,
   updatePowerSettings,
   type Intensity,
   type PowerSettings,
@@ -144,6 +146,34 @@ const EFFECT_OPTIONS: {
 
 function Row({ children }: { children: ReactNode }) {
   return <div className="flex items-start gap-3 py-2">{children}</div>;
+}
+
+function ReduceMotion({ settings }: { settings: PowerSettings }) {
+  // Re-render on OS flips: the settings snapshot itself does not change then.
+  const system = useSyncExternalStore(subscribeSystemMotion, getSystemReducedMotion, () => false);
+  const effective = settings.reduceMotion ?? system;
+  const overridden = settings.reduceMotion !== null;
+  return (
+    <Row>
+      <Checkbox
+        id="power-mode-reduceMotion"
+        className="mt-0.5"
+        checked={effective}
+        onCheckedChange={(checked) => updatePowerSettings({ reduceMotion: checked === true })}
+      />
+      <label htmlFor="power-mode-reduceMotion" className="cursor-pointer">
+        <div className="text-sm">Reduce motion</div>
+        <div className="text-xs text-muted-foreground">
+          No shake, full-screen flashes or lightning. {overridden ? "Your choice overrides the system setting." : `Following your system setting (${system ? "reduced motion on" : "off"}).`}
+        </div>
+      </label>
+      {overridden && (
+        <Button variant="ghost" size="sm" onClick={() => updatePowerSettings({ reduceMotion: null })}>
+          Use system setting
+        </Button>
+      )}
+    </Row>
+  );
 }
 
 function SettingsSection() {
@@ -267,6 +297,8 @@ function SettingsSection() {
           onChange={(glow) => updatePowerSettings({ glow })}
         />
       </div>
+
+      <ReduceMotion settings={settings} />
 
       <div>
         <div className="mb-1 text-sm font-medium">Effects</div>

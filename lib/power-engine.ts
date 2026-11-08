@@ -16,9 +16,11 @@
 import { toast } from "sonner";
 import {
   getPowerSettings,
+  getReducedMotion,
   subscribePowerSettings,
   updatePowerSettings,
   watchExternalChanges,
+  watchSystemMotion,
   type Intensity,
   type PowerSettings,
 } from "./power-store";
@@ -956,6 +958,7 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
   }
 
   function bolt(x: number, y: number, hue: number) {
+    if (getReducedMotion()) return;
     if (particles.length >= maxParticles()) return;
     const points: number[] = [];
     let px = x + rand(-260, 260);
@@ -974,6 +977,7 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
   // ---- shake (editor translation, viewport-safe page offsets)
 
   function shakeElement(el: HTMLElement, amp: number) {
+    if (getReducedMotion()) return;
     const existing = shakes.get(el);
     if (existing) {
       existing.amp = Math.min(Math.max(existing.amp, amp), 12);
@@ -1032,6 +1036,8 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
   }
 
   function flash(hue: number, x = window.innerWidth / 2, y = window.innerHeight / 2, big = false) {
+    // Reduced motion: no full-viewport flashes at all (the big one is a white-out).
+    if (getReducedMotion()) return;
     for (const el of transient) {
       if (!el.classList.contains("pm-flash")) continue;
       if (!big) return; // one at a time; a big (white-out) flash replaces it
@@ -2714,10 +2720,17 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
     // Discard stale bloom pixels before changing layer visibility. Redraw even
     // when the engine was idle when a visual setting changed.
     clearCanvases();
-    if (!next.shake || !next.screenShake) {
+    const reduced = getReducedMotion();
+    if (reduced || !next.shake || !next.screenShake) {
       for (const [el, state] of shakes) {
-        if (el === document.body ? !next.screenShake : !next.shake) releaseShake(el, state);
+        if (reduced || (el === document.body ? !next.screenShake : !next.shake)) releaseShake(el, state);
       }
+    }
+    if (reduced) {
+      for (const el of transient) {
+        if (el.classList.contains("pm-flash")) { el.remove(); transient.delete(el); }
+      }
+      particles = particles.filter((p) => p.kind !== "bolt");
     }
     if (next.enabled) start();
     updateObserver();
@@ -2762,6 +2775,7 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
   }
   const unsubscribe = subscribePowerSettings(onSettings);
   watchExternalChanges(signal);
+  watchSystemMotion(signal);
   if (settings.enabled) attach();
   updateObserver();
 
