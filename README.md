@@ -2,6 +2,10 @@
 
 Typing effects for bb, in the spirit of VS Code's Power Mode — turned up.
 
+[![Power Mode demo](docs/media/power-mode-demo.jpg)](docs/media/power-mode-demo.mp4)
+
+▶ [Watch the demo (MP4, ~1 min)](docs/media/power-mode-demo.mp4) · [how it was recorded](docs/demo-video.md)
+
 - Particle bursts from the caret, with a soft bloom glow (quarter-resolution, cheap)
 - **Themes:** 🌈 Neon, 🔥 Inferno, 🟩 Matrix (falling code), 🌸 Sakura (drifting petals), 🌃 Cyberpunk, 👾 Retro 8-bit
 - **Particles** and **Glow** sliders; particle counts also drop automatically when frames get slow
