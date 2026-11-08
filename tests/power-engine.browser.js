@@ -145,7 +145,8 @@ const result = await page.evaluate(async () => {
   assert(pixels().every(n => n === 0), 'Disable must clear particles immediately');
   PowerTest.updatePowerSettings({ enabled: true, shake: true, screenShake: false });
   advance(300);
-  PowerTest.setAgentRunning(true);
+  PowerTest.syncAgentThreads([{ id: 'agent', title: 'Agent', running: true, idle: false }], 'agent');
+  advance(30); // past the transcript settle window
   const row = document.querySelector('[data-timeline-row-id]');
   const rowBox = JSON.stringify(rect(row));
   row.textContent += ' streaming';
@@ -154,7 +155,7 @@ const result = await page.evaluate(async () => {
   advance();
   assert(pixels().some(n => n > 0), 'Agent output must still draw particles');
   assert(JSON.stringify(rect(row)) === rowBox, 'Agent output moved a virtualized row');
-  PowerTest.setAgentRunning(false);
+  PowerTest.syncAgentThreads([{ id: 'agent', title: 'Agent', running: false, idle: false }], 'agent');
   PowerTest.updatePowerSettings({ screenShake: true });
   type('resize', 'insertFromPaste'); advance();
   return { terminalInputStable: true, fixedPanelsStable: true, editorTranslationPreserved: true, themesChecked: 6,

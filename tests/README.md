@@ -33,3 +33,11 @@ afterwards, skins kept across a mid-flight theme switch, the timer, pending and
 particle caps under ten rapid 300k pastes, the singularity pull, `lightning`,
 `screenShake` and `sound` off, and disabling and re-enabling during an event. It
 uses the `setOrdnanceRandom` and `ordnanceDebug` test seams.
+
+`agent-attribution.browser.js` covers agent attribution (#12) through
+`syncAgentThreads`: a background thread finishing leaves the visible word count,
+`bestAgentWords` and finale alone, two simultaneous finishes show one finale for
+the visible thread, concurrent turns keep separate counts, a visible-thread change
+in the same update as a finish credits buffered rows to the old thread, an unknown
+route credits only a sole running thread, and threads that vanish start over. Run
+it with the other browser tests (`betterwright run --no-daemon tests/agent-attribution.browser.js`).
