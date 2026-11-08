@@ -45,6 +45,8 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      # The betterwright CLI's shebang is `env bun`; the runner has no bun.
+      - uses: oven-sh/setup-bun@v2
       # BetterWright downloads its managed Chromium; no account, profile or
       # external service is needed. The runner's kernel policy blocks Chromium's
       # setuid sandbox, so the sandbox is disabled for this throwaway job.
