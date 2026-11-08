@@ -52,4 +52,7 @@ Checked for the delivered file:
 - `ffprobe`: h264, 1280×800, 61.7 s. `ffmpeg -i power-mode-demo.mp4 -f null -` decodes the whole file without errors.
 - Contact sheets at one frame every 3 s, plus single frames at each scene change. Every scene in the table is present. The finale frame shows `TURN COMPLETE · 123 WORDS`. Captions and controls are readable at 1280×800.
 - Privacy: frames sampled at every navigation (page load, entering and leaving Settings, opening the agent thread) show the sidebar thread list blurred. The Settings sidebar shows only bb's settings sections. No paths, tokens or personal data appear.
-- Hosting: the file is committed in this repository, and the README links to it with a relative link. GitHub serves it to signed-out visitors from the file page and from the raw URL.
+- Hosting: the video is committed here. GitHub's file page offers it only as a raw download, and `raw.githubusercontent.com` serves it as `application/octet-stream`. So the README links to jsDelivr's mirror of this repository, pinned to the commit that added the file, which serves `video/mp4` with range requests:
+  https://cdn.jsdelivr.net/gh/cleanunicorn/bb-plugin-power-mode@1b2329c8e26dd843ffff036dfff3ca1bfc2853d0/docs/demo/power-mode-demo.mp4
+  Signed out, that URL returned 200 `video/mp4`, 3,261,473 bytes, byte-identical to the committed file. Chrome played it from start to end (61.68 s, 1280×800). The README's poster image and the doc links resolve on GitHub without signing in.
+- When the video is replaced, point the README link at the commit that adds the new file, so the pinned URL always shows the published version.
