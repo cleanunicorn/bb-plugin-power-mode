@@ -22,7 +22,7 @@ import {
   type Intensity,
   type PowerSettings,
 } from "./power-store";
-import { flushPowerStats, recordStats, setUnlockHandler, type Achievement } from "./power-stats";
+import { flushPowerStatsSync, recordStats, setUnlockHandler, type Achievement } from "./power-stats";
 import { ORDNANCE_SKINS, THEMES, type OrdnanceSkin, type OrdnanceSound, type Theme } from "./power-themes";
 
 // ---------------------------------------------------------------- tuning
@@ -2736,7 +2736,7 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
     if (modeCheck) cancelAnimationFrame(modeCheck);
     agentHooks = null;
     setUnlockHandler(null);
-    flushPowerStats();
+    flushPowerStatsSync();
     if (raf) cancelAnimationFrame(raf);
     if (agentFlushTimer) window.clearTimeout(agentFlushTimer);
     for (const id of timers) window.clearTimeout(id);
