@@ -54,7 +54,8 @@
     "build:test": "node scripts/build-test-site.mjs",
     "test:unit": "vitest run",
     "test:browser": "node scripts/run-browser-tests.mjs",
-    "test": "npm run test:unit && npm run test:browser",
+    "test:node": "node --test tests/*.test.mjs",
+    "test": "npm run test:unit && npm run test:node && npm run test:browser",
     "test:achievements": "node --test tests/achievement*.test.mjs"
   }
 }

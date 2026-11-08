@@ -1598,7 +1598,7 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
         description:batch.length===1?(first.flavor??first.description):"Your collection has new stories.",
         action:{label:"View gallery",onClick:()=>window.dispatchEvent(new Event("power-mode:gallery"))},
       });
-      if(!settings.enabled||window.matchMedia?.("(prefers-reduced-motion: reduce)").matches)return;
+      if(!settings.enabled||getReducedMotion())return;
       const hue={Human:48,Agent:190,Together:300}[first.category];
       if(settings.particles){attach();burst(window.innerWidth-120,90,first.category==="Agent"?24:36,hue,6,"spark");ring(window.innerWidth-120,90,hue,first.category==="Together"?100:70,450);start();}
       if(settings.sound)synth.chime();

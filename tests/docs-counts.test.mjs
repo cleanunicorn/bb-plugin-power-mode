@@ -9,10 +9,12 @@ const read = (p) => readFileSync(new URL(p, root), "utf8");
 const readme = read("README.md");
 
 test("achievement count matches ACHIEVEMENTS", () => {
-  const src = read("lib/power-stats.ts");
-  const block = src.slice(src.indexOf("export const ACHIEVEMENTS"), src.indexOf("];", src.indexOf("export const ACHIEVEMENTS")));
-  const count = (block.match(/\{ id: "/g) ?? []).length;
-  assert.match(readme, new RegExp(`\\*\\*Stats & achievements:\\*\\* ${count} unlockables`));
+  // ACHIEVEMENTS = LEGACY (literal entries) + CATALOG (badge(...) calls).
+  const stats = read("lib/power-stats.ts");
+  const legacy = stats.slice(stats.indexOf("const LEGACY"), stats.indexOf("];", stats.indexOf("const LEGACY")));
+  const catalog = read("lib/achievement-rules.ts");
+  const count = (legacy.match(/\bid: "/g) ?? []).length + (catalog.match(/^\s*badge\(/gm) ?? []).length;
+  assert.match(readme, new RegExp(`\\*\\*Stats & achievements:\\*\\* ${count} badges`));
 });
 
 test("README lists one theme per THEME_IDS entry", () => {

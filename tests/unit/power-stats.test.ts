@@ -124,6 +124,8 @@ describe("power-stats", () => {
     win = installWindow();
     stats = await freshStats();
     stats.recordStats((s) => ({ ...s, chars: 1 }));
+    expect(stats.getPowerStats().unlocked["night-owl"]).toBeUndefined();
+    stats.recordStats((s) => ({ ...s, chars: 2 }), { typed: true });
     expect(stats.getPowerStats().unlocked["night-owl"]).toBeDefined();
   });
 
