@@ -28,6 +28,29 @@ describe("power-stats", () => {
     expect(stats.getPowerStats()).toEqual(stats.EMPTY_STATS);
   });
 
+  it("unlocks the ordnance badges from paste counters", async () => {
+    const stats = await freshStats();
+    stats.recordStats((s) => ({ ...s, bestPasteTier: 4, luckyDrops: 0 }));
+    expect(stats.getPowerStats().unlocked.bombardier).toBeUndefined();
+    stats.recordStats((s) => ({ ...s, bestPasteTier: 5, luckyDrops: 1 }));
+    const unlocked = stats.getPowerStats().unlocked;
+    expect(unlocked.bombardier).toBeTruthy();
+    expect(unlocked["lucky-drop"]).toBeTruthy();
+    expect(unlocked.doomsday).toBeUndefined();
+    stats.recordStats((s) => ({ ...s, bestPasteTier: 8 }));
+    expect(stats.getPowerStats().unlocked.doomsday).toBeTruthy();
+    const doomsday = stats.ACHIEVEMENTS.find((a) => a.id === "doomsday")!;
+    expect(doomsday.hidden).toBe(true);
+    expect(doomsday.requires).toEqual(["ordnance-stats"]);
+    expect(stats.ACHIEVEMENTS.filter((a) => a.requires.includes("legacy-stats"))).toHaveLength(19);
+  });
+
+  it("sanitizes the paste counters from storage", async () => {
+    win.data.set(STATS_KEY, JSON.stringify({ bestPasteTier: 42, luckyDrops: -2 }));
+    const stats = await freshStats();
+    expect(stats.getPowerStats()).toMatchObject({ bestPasteTier: 9, luckyDrops: 0 });
+  });
+
   it("accumulates recorded events", async () => {
     const stats = await freshStats();
     stats.recordStats((s) => ({ ...s, chars: s.chars + 3 }));

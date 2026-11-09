@@ -8,16 +8,16 @@ Typing effects for bb, in the spirit of VS Code's Power Mode — turned up.
 
 ▶️ **[Watch the 84-second demo](https://cdn.jsdelivr.net/gh/cleanunicorn/bb-plugin-power-mode@81cac1e19cfeefbdefe92c90ce5973d0f70b509c/docs/media/power-mode-demo.mp4)** (MP4, 1280×800, no sound; [file in the repo](docs/media/power-mode-demo.mp4)): turning Power Mode on, typing combos, paste ordnance, switching the theme in Settings, and an agent reply through its "TURN COMPLETE" finale. [How it was recorded](docs/demo-video.md).
 
-- Particle bursts from the caret, with a soft bloom glow (quarter-resolution, cheap)
+- Particle bursts from the caret, with a soft bloom glow (quarter-resolution, cheap). Fast sparks leave streaks, debris bounces off the bottom of the window, and explosions leave drifting smoke
 - **Themes:** 🌈 Neon, 🔥 Inferno, 🟩 Matrix (falling code), 🌸 Sakura (drifting petals), 🌃 Cyberpunk, 👾 Retro 8-bit
 - **Particles** and **Glow** sliders; particle counts also drop automatically when frames get slow
 - **Reduce motion** (Settings): follows the OS `prefers-reduced-motion` setting until you choose; your explicit choice then sticks across OS changes and reloads. When active there is no editor/screen shake, no full-screen flash (including the white-out on tier 7–9 pastes and combo slams) and no lightning. Particles, slam text, the vignette pulse and bloom are unchanged.
 - Editor shake on every keystroke; screen shake on Enter, paste, and combo milestones
-- Combo counter with WPM gauge, draining timer, tier titles, and milestone slams with explosions and lightning
+- Combo counter with WPM gauge, draining timer, tier titles, and milestone slams with explosions and lightning. Slam titles land letter by letter, the HUD pulses once the combo passes 100, the timer bar flashes red with a "FADING" warning in its last 30%, and a streak of 25+ that ends without a record shatters off the HUD with a "COMBO LOST" slam
 - Flying letters, red shards on Backspace, shockwave on Enter
 - **Paste ordnance:** pasting drops theme-styled ordnance that scales with the paste, across 9 levels from firecracker to singularity (see below)
 - **Agent Power Mode:** while an agent writes its reply, sparks fly from the newest text, an agent word combo builds ("AGENT IS COOKING" → "AGI ACHIEVED?!"), and a "TURN COMPLETE" finale plays when it finishes. Effects and word counts belong to the thread on screen: a background thread finishing never resets or claims the visible count, and each finale carries its own thread's words and title (turns that were only partly on screen count as turns but not toward best words)
-- **Stats & achievements:** 51 badges across Human, Agent, and Together, including hidden discoveries. Filter the gallery, follow visible progress, pin a challenge, equip a cosmetic title, and revisit your local session postcard in Settings
+- **Stats & achievements:** 55 badges across Human, Agent, and Together, including hidden discoveries. Unlocks slide in as a banner with the badge icon, a sheen sweep and confetti in the category's color (gold for secrets). The gallery shows a completion meter, per-category counts, progress bars on locked badges and a NEW pill on this session's discoveries. Filter the gallery, pin a challenge, equip a cosmetic title, and revisit your local session postcard in Settings
 - Optional synth sound
 
 Toggle with the ⚡ button in the sidebar footer or Mod+Alt+P. Tune it under Settings → Power Mode.
@@ -40,7 +40,8 @@ Pasting (or dropping) text drops weapons near the caret. Bigger pastes drop bigg
 | 8 | Tactical nuke: siren, white-out, mushroom cloud, aftershocks | 60k–200k | +75 |
 | 9 | Singularity: a black hole pulls in every particle, then goes supernova | ≥ 200k | +100 |
 
-- About 1 paste in 12 is a **lucky drop**, upgraded one tier (never into tier 8 or 9).
+- About 1 paste in 12 is a **lucky drop**, upgraded one tier (never into tier 8 or 9). A gold ring and a shower of 🍀 announce it before the weapon lands.
+- Ordnance earns badges: Bombardier (tier 5), Lucky Drop, Pyrotechnician (100 combo milestones) and one secret for the very largest pastes.
 - Each theme skins the weapons, their debris, slam titles and sound: Neon draws glowing outlines, Inferno solid iron and embers, Matrix monospace glyphs (`TNT`, `=>>`, `NULL` → `SEGFAULT`), Sakura paper firecrackers, cranes and lanterns with petals, Cyberpunk chromatic-split hardware, and Retro 8-bit pixel sprites. The skin is captured at drop, so switching themes mid-flight doesn't mix them.
 - Tiers 7–9 are events: one runs at a time, and a paste during one drops carpet bombing instead. At most 24 detonations are pending at once; past that a paste gets the plain burst. Image or file pastes (no text) also get the plain burst.
 - Impacts land at least 60 px from the caret. Intensity scales the explosions and shake; `lightning`, `screen shake`, `sound` and text protection apply as usual.

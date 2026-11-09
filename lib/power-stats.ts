@@ -24,6 +24,10 @@ export interface PowerStats {
   agentChars: number;
   bestAgentWords: number;
   agentTurns: number;
+  /** Highest paste ordnance tier dropped (1–9). */
+  bestPasteTier: number;
+  /** Pastes upgraded by a lucky drop. */
+  luckyDrops: number;
   themesTried: ThemeId[];
   /** achievement id → unlock time (ms since epoch) */
   unlocked: Record<string, number>;
@@ -40,6 +44,8 @@ export const EMPTY_STATS: PowerStats = {
   agentChars: 0,
   bestAgentWords: 0,
   agentTurns: 0,
+  bestPasteTier: 0,
+  luckyDrops: 0,
   themesTried: [],
   unlocked: {},
 };
@@ -72,7 +78,11 @@ export interface StatsEvent {
 /** Night Owl window: 00:00 inclusive to 04:00 exclusive, local time. */
 export const NIGHT_OWL_END_HOUR = 4;
 
-const LEGACY: Omit<Achievement, "category" | "hidden" | "requires">[] = [
+/** Stats-driven badges. The first 19 are the original set; later ones read the paste ordnance counters. */
+const LEGACY: (Omit<Achievement, "category" | "hidden" | "requires"> & {
+  hidden?: boolean;
+  requires?: ReadonlyArray<string>;
+})[] = [
   {
     id: "first-spark",
     icon: "✨",
@@ -206,14 +216,51 @@ const LEGACY: Omit<Achievement, "category" | "hidden" | "requires">[] = [
     description: "Try every theme.",
     check: (s) => THEME_IDS.every((t) => s.themesTried.includes(t)),
   },
+  {
+    id: "bombardier",
+    icon: "💣",
+    title: "Bombardier",
+    description: "Drop tier 5 ordnance: paste 2,000 characters or more.",
+    flavor: "The bomber run has been authorized.",
+    requires: ["ordnance-stats"],
+    check: (s) => s.bestPasteTier >= 5,
+  },
+  {
+    id: "lucky-drop",
+    icon: "🍀",
+    title: "Lucky Drop",
+    description: "Land a lucky drop. About one paste in twelve upgrades a tier.",
+    flavor: "The clipboard smiled on you.",
+    requires: ["ordnance-stats"],
+    check: (s) => s.luckyDrops >= 1,
+  },
+  {
+    id: "pyrotechnician",
+    icon: "🎆",
+    title: "Pyrotechnician",
+    description: "Hit 100 combo milestones.",
+    flavor: "Every slam is a small fireworks show.",
+    requires: ["ordnance-stats"],
+    check: (s) => s.milestones >= 100,
+  },
+  {
+    id: "doomsday",
+    icon: "☢️",
+    title: "Doomsday Device",
+    description: "Trigger a tactical nuke or a singularity with one paste.",
+    flavor: "You pasted an entire repository, didn't you.",
+    requires: ["ordnance-stats"],
+    hidden: true,
+    check: (s) => s.bestPasteTier >= 8,
+  },
 ];
 
 export const ACHIEVEMENTS: Achievement[] = [
   ...LEGACY.map((a) => ({
     ...a,
     category: (a.id.startsWith("agent-") ? "Agent" : "Human") as Category,
-    hidden: false,
-    requires: ["legacy-stats"],
+    hidden: a.hidden ?? false,
+    requires: a.requires ?? ["legacy-stats"],
   })),
   ...CATALOG.map((a) => ({ ...a, check: () => false })),
 ];
@@ -323,6 +370,8 @@ function parse(raw: string | null): PowerStats {
       agentChars: n("agentChars"),
       bestAgentWords: n("bestAgentWords"),
       agentTurns: n("agentTurns"),
+      bestPasteTier: Math.min(9, n("bestPasteTier")),
+      luckyDrops: n("luckyDrops"),
       themesTried: Array.isArray(v.themesTried)
         ? THEME_IDS.filter((t) => (v.themesTried as unknown[]).includes(t))
         : [],
