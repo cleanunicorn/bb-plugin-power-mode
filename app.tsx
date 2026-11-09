@@ -47,6 +47,7 @@ import {
 import {
   availableTitles,
   challengeProgress,
+  challengeProgressRatio,
 } from "./lib/achievement-presentation";
 import { getCollection, setCollectionPreference } from "./lib/power-stats";
 import { THEMES } from "@/lib/power-themes";
@@ -384,6 +385,49 @@ function Stat({ label, value }: { label: string; value: string | number }) {
 const SELECT_CLASS =
   "h-8 rounded-md border border-input bg-background px-2 text-sm shadow-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring";
 
+/** Category accent colors; the engine's unlock banner and confetti use the same hues. */
+const CATEGORY_COLOR: Record<string, string> = {
+  Human: "hsl(48 100% 55%)",
+  Agent: "hsl(190 100% 55%)",
+  Together: "hsl(300 100% 65%)",
+};
+const SECRET_COLOR = "hsl(45 100% 60%)";
+
+function Meter({
+  value,
+  color,
+  className,
+  label,
+}: {
+  value: number;
+  color: string;
+  className?: string;
+  label: string;
+}) {
+  return (
+    <div
+      className={cn(
+        "h-1.5 w-full overflow-hidden rounded-full bg-foreground/10",
+        className,
+      )}
+      role="progressbar"
+      aria-label={label}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={Math.round(value * 100)}
+    >
+      <div
+        className="h-full rounded-full transition-[width] duration-500"
+        style={{
+          width: `${Math.round(value * 100)}%`,
+          background: `linear-gradient(90deg, ${color}, #fff)`,
+          boxShadow: value > 0 ? `0 0 8px ${color}` : undefined,
+        }}
+      />
+    </div>
+  );
+}
+
 export function StatsAndAchievements() {
   const stats = usePowerStats();
   const [category, setCategory] = useState("All");
@@ -397,6 +441,11 @@ export function StatsAndAchievements() {
   );
   const next = ACHIEVEMENTS.find((a) => !a.hidden && !stats.unlocked[a.id]);
   const unlockedCount = ACHIEVEMENTS.filter((a) => stats.unlocked[a.id]).length;
+  const secretsFound = ACHIEVEMENTS.filter(
+    (a) => a.hidden && stats.unlocked[a.id],
+  ).length;
+  const completion = unlockedCount / ACHIEVEMENTS.length;
+  const fresh = new Set(collection.session.discoveries);
   return (
     <div className="space-y-3">
       <div className="text-sm font-medium">Stats</div>
@@ -412,11 +461,50 @@ export function StatsAndAchievements() {
         />
         <Stat label="Agent turns" value={stats.agentTurns} />
         <Stat
-          label="Achievements"
-          value={`${unlockedCount}/${ACHIEVEMENTS.length}`}
+          label="Biggest paste tier"
+          value={stats.bestPasteTier ? `Tier ${stats.bestPasteTier}` : "—"}
         />
       </div>
       <div className="pt-2 text-sm font-medium">Achievements</div>
+      <div
+        className="rounded-lg border border-border bg-card p-3"
+        aria-label="Collection progress"
+      >
+        <div className="mb-2 flex items-baseline justify-between gap-3 text-sm">
+          <span className="font-semibold">
+            {Math.round(completion * 100)}% collected
+          </span>
+          <span className="text-xs tabular-nums text-muted-foreground">
+            {unlockedCount} of {ACHIEVEMENTS.length} badges · {secretsFound}{" "}
+            {secretsFound === 1 ? "secret" : "secrets"} found
+          </span>
+        </div>
+        <Meter
+          value={completion}
+          color={completion >= 1 ? SECRET_COLOR : CATEGORY_COLOR.Agent}
+          className="h-2"
+          label="Collection completion"
+        />
+        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+          {(["Human", "Agent", "Together"] as const).map((c) => {
+            const all = ACHIEVEMENTS.filter((a) => a.category === c);
+            const got = all.filter((a) => stats.unlocked[a.id]).length;
+            return (
+              <span key={c} className="inline-flex items-center gap-1.5">
+                <span
+                  aria-hidden
+                  className="inline-block size-2 rounded-full"
+                  style={{
+                    background: CATEGORY_COLOR[c],
+                    boxShadow: `0 0 6px ${CATEGORY_COLOR[c]}`,
+                  }}
+                />
+                {c} {got}/{all.length}
+              </span>
+            );
+          })}
+        </div>
+      </div>
       <p className="text-xs text-muted-foreground">
         Agent badges record observed activity. They do not judge correctness or
         task success. A session ends after ten idle minutes or reload.
@@ -496,7 +584,14 @@ export function StatsAndAchievements() {
                 key={a.id}
                 className="flex items-center gap-3 rounded-lg border border-dashed border-border px-3 py-2"
               >
-                <span className="text-2xl opacity-55" aria-hidden>
+                <span
+                  className="grid size-10 flex-none place-items-center rounded-full text-2xl opacity-55"
+                  style={{
+                    background:
+                      "repeating-linear-gradient(135deg, transparent 0 4px, color-mix(in srgb, currentColor 10%, transparent) 4px 8px)",
+                  }}
+                  aria-hidden
+                >
                   ◇
                 </span>
                 <div className="min-w-0">
@@ -507,21 +602,64 @@ export function StatsAndAchievements() {
                 </div>
               </li>
             );
+          const color = a.hidden ? SECRET_COLOR : CATEGORY_COLOR[a.category];
+          const ratio = at ? null : challengeProgressRatio(a.id, stats);
           return (
             <li
               key={a.id}
               className={cn(
-                "flex items-center gap-3 rounded-lg border px-3 py-2",
+                "relative flex items-center gap-3 overflow-hidden rounded-lg border px-3 py-2 pl-4",
                 at
                   ? "border-border bg-card"
-                  : "border-dashed border-border opacity-55",
+                  : "border-dashed border-border opacity-70",
               )}
             >
-              <span className={cn("text-2xl", !at && "grayscale")} aria-hidden>
+              <span
+                aria-hidden
+                className="absolute inset-y-0 left-0 w-1"
+                style={{
+                  background: color,
+                  opacity: at ? 1 : 0.45,
+                  boxShadow: at ? `0 0 10px ${color}` : undefined,
+                }}
+              />
+              <span
+                className={cn(
+                  "grid size-10 flex-none place-items-center rounded-full text-2xl",
+                  !at && "grayscale",
+                )}
+                style={
+                  at
+                    ? {
+                        background: `radial-gradient(circle, color-mix(in srgb, ${color} 35%, transparent), transparent 72%)`,
+                        boxShadow: `inset 0 0 0 1px color-mix(in srgb, ${color} 60%, transparent)`,
+                      }
+                    : undefined
+                }
+                aria-hidden
+              >
                 {at ? a.icon : "🔒"}
               </span>
-              <div className="min-w-0">
-                <div className="text-sm font-semibold">{a.title}</div>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <div className="text-sm font-semibold">{a.title}</div>
+                  {at && fresh.has(a.id) && (
+                    <span
+                      className="rounded-full px-1.5 py-px text-[10px] font-bold tracking-widest text-background"
+                      style={{ background: color, boxShadow: `0 0 8px ${color}` }}
+                    >
+                      NEW
+                    </span>
+                  )}
+                  {at && a.hidden && (
+                    <span
+                      className="text-[10px] font-bold tracking-widest"
+                      style={{ color }}
+                    >
+                      SECRET
+                    </span>
+                  )}
+                </div>
                 <div className="text-xs text-muted-foreground">
                   {a.description}
                   {at ? ` · ${new Date(at).toLocaleDateString()}` : ""}
@@ -529,6 +667,14 @@ export function StatsAndAchievements() {
                 {at && a.flavor && <p className="text-xs">{a.flavor}</p>}
                 {!at && (
                   <p className="text-xs">{challengeProgress(a.id, stats)}</p>
+                )}
+                {ratio !== null && (
+                  <Meter
+                    value={ratio}
+                    color={color}
+                    className="mt-1 h-1"
+                    label={`${a.title} progress`}
+                  />
                 )}
                 {!a.hidden && (
                   <button

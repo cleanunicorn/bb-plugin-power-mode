@@ -4,8 +4,10 @@ The executable catalog is `lib/achievement-rules.ts`: `CATALOG` owns stable IDs,
 category, hidden visibility, authored requirements, flavor and eligible event
 families; `RULES` owns measurement targets. Category and visibility are independent.
 Keep requirement/progress copy in this catalog aligned when changing targets.
-The legacy definitions in `power-stats.ts` preserve all 19 existing IDs. There are
-32 additions and 51 total badges. Do not expose locked hidden metadata in UI,
+The stats-driven definitions in `power-stats.ts` preserve all 19 original IDs and
+add four ordnance badges (`requires: ["ordnance-stats"]`, read from `bestPasteTier`,
+`luckyDrops` and `milestones`; `doomsday` is hidden). With the 32 event-driven
+additions there are 55 total badges. Do not expose locked hidden metadata in UI,
 accessible names, tooltips, progress, pins or the postcard.
 
 ## State and attribution

@@ -70,8 +70,34 @@ export function challengeProgress(id: string, stats: PowerStats): string {
     } else return "A moment to discover";
     return `${Math.min(value, target)} / ${target} ${label}`;
   }
+  if (a.requires.includes("ordnance-stats")) {
+    if (id === "bombardier")
+      return `${Math.min(stats.bestPasteTier, 5)} / 5 best paste tier`;
+    if (id === "lucky-drop")
+      return `${Math.min(stats.luckyDrops, 1)} / 1 lucky drops`;
+    if (id === "pyrotechnician")
+      return `${Math.min(stats.milestones, 100)} / 100 milestones`;
+    if (id === "doomsday")
+      return `${Math.min(stats.bestPasteTier, 8)} / 8 best paste tier`;
+    return "A moment to discover";
+  }
   const p = progress(id, getCollection());
   return `${Math.round(p.value * 10) / 10} / ${p.target} ${p.label}`;
+}
+/**
+ * Progress toward a visible challenge as 0–1, or null when there is nothing
+ * to measure (unlocked, hidden-and-locked, or a moment-based badge).
+ */
+export function challengeProgressRatio(
+  id: string,
+  stats: PowerStats,
+): number | null {
+  const text = challengeProgress(id, stats);
+  const m = /^([\d.]+) \/ ([\d.]+)/.exec(text);
+  if (!m) return null;
+  const target = Number(m[2]);
+  if (!(target > 0)) return null;
+  return Math.max(0, Math.min(1, Number(m[1]) / target));
 }
 export function hudChallenge(stats: PowerStats): string {
   const c = getCollection(),

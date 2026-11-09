@@ -177,7 +177,7 @@ function tierName(combo: number): string {
 
 // ---------------------------------------------------------------- types
 
-type ParticleKind = "spark" | "ember" | "shard" | "glyph" | "ring" | "bolt" | "pixel" | "petal" | "code" | "ordnance";
+type ParticleKind = "spark" | "ember" | "shard" | "glyph" | "ring" | "bolt" | "pixel" | "petal" | "code" | "ordnance" | "smoke";
 
 type OrdVariant =
   | "cracker" | "stick" | "canister" | "bomblet" | "rocket" | "bomber"
@@ -323,6 +323,14 @@ const CSS = `
   font-family:var(--pm-font);opacity:0;transform:translateX(30px) scale(.9);
   transition:opacity .25s ease,transform .25s cubic-bezier(.2,1.6,.4,1);will-change:transform,opacity}
 .pm-hud.pm-on{opacity:1;transform:none}
+.pm-hud.pm-hot{animation:pm-hot 1s ease-in-out infinite alternate}
+@keyframes pm-hot{0%{filter:drop-shadow(0 0 6px var(--pm-glow))}100%{filter:drop-shadow(0 0 22px var(--pm-glow)) brightness(1.15)}}
+.pm-hud.pm-danger .pm-hud-label{color:#ff6b6b;text-shadow:0 0 10px rgba(255,80,80,.9)}
+.pm-hud.pm-danger .pm-hud-label::after{content:" · FADING"}
+.pm-hud.pm-danger .pm-hud-fill{background:linear-gradient(90deg,#7f1d1d,#ef4444,#fff);animation:pm-danger .3s steps(2,end) infinite}
+.pm-hud.pm-danger .pm-hud-bar{animation:pm-jitter .14s linear infinite}
+@keyframes pm-danger{0%{opacity:1}100%{opacity:.4}}
+@keyframes pm-jitter{0%{transform:translate(0,0)}25%{transform:translate(1.5px,-1px)}50%{transform:translate(-1.5px,1px)}75%{transform:translate(1px,1.5px)}100%{transform:translate(0,0)}}
 .pm-hud-label{font-size:12px;font-weight:900;letter-spacing:.45em;color:#fff;opacity:.85;text-shadow:0 0 8px var(--pm-glow)}
 .pm-hud-count{font-size:64px;line-height:1;font-weight:900;font-style:italic;letter-spacing:-.02em;
   background:linear-gradient(180deg,#fff 0%,var(--pm-color) 55%,var(--pm-deep) 100%);
@@ -344,6 +352,39 @@ const CSS = `
   text-shadow:0 0 24px var(--pm-glow),4px 6px 0 var(--pm-deep);
   will-change:transform,opacity;animation:pm-slam 1.6s cubic-bezier(.15,1.4,.35,1) forwards}
 .pm-slam small{display:block;text-align:center;font-size:.22em;letter-spacing:.6em;font-style:normal;-webkit-text-stroke:0;margin-top:.2em}
+.pm-slam .pm-ch{display:inline-block;white-space:pre;animation:pm-ch .55s cubic-bezier(.2,1.8,.4,1) both;animation-delay:calc(var(--i) * 26ms)}
+@keyframes pm-ch{0%{opacity:0;transform:translateY(.55em) scale(1.7) rotate(9deg)}100%{opacity:1;transform:none}}
+.pm-slam.pm-lost{font-size:clamp(26px,4vw,56px);color:#fff;-webkit-text-stroke:1px #7f1d1d;
+  text-shadow:0 0 18px rgba(239,68,68,.8),3px 4px 0 #7f1d1d;animation:pm-lost 1.3s ease-in forwards}
+.pm-slam.pm-lost small{letter-spacing:.3em}
+@keyframes pm-lost{
+  0%{opacity:1;transform:translate(-50%,-50%) scale(1.15) rotate(-3deg)}
+  12%{transform:translate(calc(-50% + 7px),-50%) scale(1) rotate(2deg)}
+  24%{transform:translate(calc(-50% - 7px),-50%) rotate(-2deg)}
+  36%{transform:translate(-50%,-50%) rotate(0)}
+  60%{opacity:1;transform:translate(-50%,-48%) rotate(0)}
+  100%{opacity:0;transform:translate(-50%,30%) rotate(8deg)}}
+.pm-badge{position:fixed;left:50%;top:13%;z-index:2147483002;pointer-events:none;transform:translateX(-50%);
+  display:flex;align-items:center;gap:14px;padding:12px 24px 12px 14px;border-radius:18px;font-family:var(--pm-font);color:#fff;
+  background:linear-gradient(135deg,rgba(12,12,24,.94),rgba(34,30,58,.9));border:1px solid var(--pm-color);
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,.08),0 0 36px var(--pm-glow),0 14px 44px rgba(0,0,0,.45);
+  overflow:hidden;will-change:transform,opacity;animation:pm-badge 3.4s cubic-bezier(.2,1.4,.4,1) both}
+.pm-badge::after{content:"";position:absolute;inset:0;pointer-events:none;
+  background:linear-gradient(115deg,transparent 35%,rgba(255,255,255,.38) 50%,transparent 65%);
+  transform:translateX(-130%);animation:pm-sheen 1.1s ease .45s forwards}
+.pm-badge-icon{font-size:32px;line-height:1;width:56px;height:56px;flex:none;display:grid;place-items:center;border-radius:50%;
+  background:radial-gradient(circle,var(--pm-glow),transparent 72%);box-shadow:0 0 0 2px var(--pm-color),0 0 20px var(--pm-glow);
+  animation:pm-badge-icon .7s cubic-bezier(.2,1.9,.4,1) .12s both}
+.pm-badge-kicker{font-size:10px;font-weight:900;letter-spacing:.45em;color:var(--pm-color);text-shadow:0 0 8px var(--pm-glow)}
+.pm-badge-title{font-size:22px;line-height:1.15;font-weight:900;font-style:italic;letter-spacing:-.01em;white-space:nowrap}
+.pm-badge-sub{font-size:11px;opacity:.78;max-width:380px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@keyframes pm-badge{0%{opacity:0;transform:translate(-50%,-48px) scale(.82)}10%{opacity:1;transform:translate(-50%,0) scale(1.05)}16%{transform:translate(-50%,0) scale(1)}
+  86%{opacity:1;transform:translate(-50%,0) scale(1)}100%{opacity:0;transform:translate(-50%,-28px) scale(.96)}}
+@keyframes pm-sheen{to{transform:translateX(130%)}}
+@keyframes pm-badge-icon{0%{transform:scale(0) rotate(-40deg)}100%{transform:scale(1) rotate(0)}}
+.pm-badge.pm-retro .pm-badge-title{font-style:normal}.pm-badge.pm-retro{border-radius:0}
+.pm-badge.pm-light{color:#111;background:linear-gradient(135deg,rgba(255,255,255,.97),rgba(243,242,255,.94));box-shadow:0 0 0 1px rgba(0,0,0,.06),0 0 30px var(--pm-glow),0 14px 40px rgba(0,0,0,.18)}
+.pm-badge.pm-light .pm-badge-kicker{color:var(--pm-deep)}
 @keyframes pm-slam{
   0%{opacity:0;transform:translate(-50%,-50%) scale(4) rotate(-12deg)}
   14%{opacity:1;transform:translate(-50%,-50%) scale(.92) rotate(-4deg)}
@@ -455,6 +496,12 @@ class Synth {
 
   powerDown() {
     this.tone(660, 0.5, "triangle", 0.25, 0, 60);
+  }
+
+  /** Combo broke: a short, sour slide down. */
+  lost() {
+    this.tone(440, 0.28, "sawtooth", 0.18, 0, 150);
+    this.tone(330, 0.3, "square", 0.08, 0.05, 110);
   }
 
   // ---- ordnance sounds. `flavor` re-voices them per theme; `at` is a Web
@@ -664,6 +711,27 @@ function glowSprite(hue: number): HTMLCanvasElement {
 }
 
 /** Cached `hsl()` strings so the render loop allocates no strings per particle. */
+const smokeSprites = new Map<string, HTMLCanvasElement>();
+/** Soft gray puff; darker on light pages so it reads as smoke, not haze. */
+function smokeSprite(): HTMLCanvasElement {
+  const key = lightMode ? "l" : "d";
+  let sprite = smokeSprites.get(key);
+  if (sprite) return sprite;
+  sprite = document.createElement("canvas");
+  sprite.width = sprite.height = SPRITE_SIZE;
+  const c = sprite.getContext("2d")!;
+  const r = SPRITE_SIZE / 2;
+  const g = c.createRadialGradient(r, r, 0, r, r, r);
+  const tone = lightMode ? "70,70,80" : "200,200,215";
+  g.addColorStop(0, `rgba(${tone},.5)`);
+  g.addColorStop(0.5, `rgba(${tone},.22)`);
+  g.addColorStop(1, `rgba(${tone},0)`);
+  c.fillStyle = g;
+  c.fillRect(0, 0, SPRITE_SIZE, SPRITE_SIZE);
+  smokeSprites.set(key, sprite);
+  return sprite;
+}
+
 function hsl(hue: number, light: number): string {
   // On a light page, pull pastel/bright lightness down into a 30–50% "ink" range.
   const l = lightMode ? Math.round(30 + (light / 100) * 20) : light;
@@ -876,6 +944,7 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
     lightMode = next;
     themeBucket = -1; // force HUD/vignette variables to re-apply
     styleCache.clear();
+    smokeSprites.clear();
     applyThemeStatic();
   }
 
@@ -943,6 +1012,21 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
   function ring(x: number, y: number, hue: number, size: number, life = 520) {
     if (particles.length >= maxParticles()) return;
     particles.push({ kind: "ring", x, y, vx: 0, vy: 0, life, maxLife: life, size, hue, spin: 0, angle: 0 });
+  }
+
+  /** Lingering puffs that rise and spread after a blast; `size` scales the plume. */
+  function smoke(x: number, y: number, requested: number, size: number) {
+    const count = room(requested);
+    for (let i = 0; i < count; i++) {
+      // Short enough that the power-on plume is gone within ~1.5 s.
+      const life = rand(650, 1250) * (0.75 + size * 0.25);
+      particles.push({
+        kind: "smoke", x: x + rand(-8, 8) * size, y: y + rand(-6, 6) * size,
+        vx: rand(-0.55, 0.55) * size, vy: rand(-1.1, -0.35),
+        life, maxLife: life, size: rand(9, 18) * size, hue: 0,
+        spin: rand(-0.02, 0.02), angle: rand(0, Math.PI * 2),
+      });
+    }
   }
 
   function glyph(x: number, y: number, hue: number, text: string, scale: number) {
@@ -1055,13 +1139,27 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
     later(() => { el.remove(); transient.delete(el); }, big ? 950 : 500);
   }
 
-  function slam(title: string, subtitle: string, hue: number, variant: "" | "quiet" | "agent" = "", src: Theme = theme) {
+  function slam(title: string, subtitle: string, hue: number, variant: "" | "quiet" | "agent" | "lost" = "", src: Theme = theme) {
     for (const el of transient) if (el.classList.contains("pm-slam")) { el.remove(); transient.delete(el); }
     const el = document.createElement("div");
     el.className = `pm-slam${variant ? ` pm-${variant}` : ""}${src.id === "retro" ? " pm-retro" : ""}`;
     el.setAttribute("aria-hidden", "true");
     setTheme(el, hue);
-    el.textContent = title;
+    // Big slams land letter by letter; quiet ones (and reduced motion) stay a single run of text.
+    // The title stays one element (its text is the first child), with a span per letter inside.
+    const letters = Array.from(title);
+    if ((variant === "" || variant === "agent") && letters.length <= 24 && !getReducedMotion()) {
+      const run = document.createElement("span");
+      run.className = "pm-title";
+      letters.forEach((ch, i) => {
+        const span = document.createElement("span");
+        span.className = "pm-ch";
+        span.style.setProperty("--i", String(i));
+        span.textContent = ch;
+        run.appendChild(span);
+      });
+      el.appendChild(run);
+    } else el.textContent = title;
     if (subtitle) {
       const small = document.createElement("small");
       small.textContent = subtitle;
@@ -1069,12 +1167,41 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
     }
     document.documentElement.appendChild(el);
     transient.add(el);
-    later(() => { el.remove(); transient.delete(el); }, variant === "quiet" ? 1150 : 1650);
+    later(() => { el.remove(); transient.delete(el); }, variant === "quiet" ? 1150 : variant === "lost" ? 1350 : 1650);
+  }
+
+  /** Achievement unlock banner: icon, kicker and title in the category's color, with a sheen sweep. */
+  function badgeBanner(a: Achievement, extra: number, hue: number) {
+    for (const el of transient) if (el.classList.contains("pm-badge")) { el.remove(); transient.delete(el); }
+    const el = document.createElement("div");
+    el.className = `pm-badge${theme.id === "retro" ? " pm-retro" : ""}`;
+    el.setAttribute("aria-hidden", "true");
+    setTheme(el, hue);
+    const icon = document.createElement("div");
+    icon.className = "pm-badge-icon";
+    icon.textContent = a.icon;
+    const text = document.createElement("div");
+    const kicker = document.createElement("div");
+    kicker.className = "pm-badge-kicker";
+    kicker.textContent = a.hidden ? "SECRET DISCOVERED" : "ACHIEVEMENT UNLOCKED";
+    const title = document.createElement("div");
+    title.className = "pm-badge-title";
+    title.textContent = extra > 0 ? `${a.title} +${extra}` : a.title;
+    const sub = document.createElement("div");
+    sub.className = "pm-badge-sub";
+    sub.textContent = extra > 0 ? `${extra + 1} achievements unlocked at once` : (a.flavor ?? a.description);
+    text.append(kicker, title, sub);
+    el.append(icon, text);
+    document.documentElement.appendChild(el);
+    transient.add(el);
+    later(() => { el.remove(); transient.delete(el); }, 3450);
+    return el;
   }
 
   function explode(x: number, y: number, hue: number, mult: number) {
     burst(x, y, hue, 90 * mult, 13);
     if (theme.shape === "glow") burst(x, y, (hue + 40) % 360, 35 * mult, 7, "ember");
+    smoke(x, y, 6 * mult, 1);
     ring(x, y, hue, 340, 700);
     ring(x, y, (hue + 60) % 360, 220, 520);
     // Keep the flash's bright center off the text being typed.
@@ -1196,6 +1323,8 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
     burst(x, y, d.hue, (20 + 70 * size) * d.power, 6 + 8 * size, debrisKind(d), aimed);
     if (d.src.shape === "glow") burst(x, y, (d.hue + 40) % 360, (6 + 24 * size) * d.power, 3 + 4 * size, "ember", { src: d.src });
     ring(x, y, d.hue, 60 + 280 * size, 400 + 320 * size);
+    if (size >= 0.5) ring(x, y, (d.hue + 30) % 360, 40 + 160 * size, 260 + 200 * size);
+    smoke(x, y, (2 + 7 * size) * d.power, 0.6 + size);
     if (opts.flash) {
       // Keep the flash's bright center off the text being typed.
       if (settings.protectText) flash(d.hue, undefined, undefined, opts.big);
@@ -1467,6 +1596,18 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
       skin: ORDNANCE_SKINS[theme.id], src: theme, hue: theme.hue(combo, performance.now()),
       power: tune.particles, shake: tune.shake, chars, tier: pick.tier, lucky: pick.lucky, milestone,
     };
+    if (pick.lucky) {
+      // A four-leaf shower and a gold ring announce the upgrade before the weapon lands.
+      ring(x, y, 48, 170, 650);
+      burst(x, y, 48, 24 * d.power, 5);
+      if (settings.ghostLetters) for (let i = 0; i < 7; i++) glyph(x + rand(-30, 30), y, 48, "🍀", 1.1);
+      if (settings.sound) synth.chime();
+    }
+    recordStats((s) => ({
+      ...s,
+      bestPasteTier: Math.max(s.bestPasteTier, pick.tier),
+      luckyDrops: s.luckyDrops + (pick.lucky ? 1 : 0),
+    }));
     switch (pick.tier) {
       case 1: firecracker(d, x, y, pick.count); break;
       case 2: dynamite(d, x, y, pick.count); break;
@@ -1527,12 +1668,13 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
     tierText = setText(hudTier, tier, tierText);
     applyTheme(hue);
     hud.classList.add("pm-on");
+    hud.classList.toggle("pm-hot", label === "COMBO" && count >= 100 && !getReducedMotion());
     bumpHud();
   }
 
   function hideHudIfIdle() {
     if (combo === 0 && !agentHudActive) {
-      hud.classList.remove("pm-on");
+      hud.classList.remove("pm-on", "pm-hot", "pm-danger");
       vignette.style.opacity = "0";
       wpmText = setText(hudWpm, "", wpmText);
     }
@@ -1557,7 +1699,17 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
       slam(`×${earned}`, "NEW RECORD", theme.hue(earned, performance.now()));
       updatePowerSettings({ bestCombo: earned });
       if (settings.sound) synth.fanfare();
+    } else if (earned >= 25) {
+      // The streak broke: the counter shatters off the HUD.
+      const r = hudCount.getBoundingClientRect();
+      const x = r.width ? r.left + r.width / 2 : window.innerWidth - 80;
+      const y = r.height ? r.top + r.height / 2 : 100;
+      burst(x, y, 355, 26, 7, theme.shape === "pixel" ? "pixel" : "shard");
+      smoke(x, y, 3, 0.8);
+      slam("COMBO LOST", `×${earned}`, 355, "lost");
+      if (settings.sound) synth.lost();
     }
+    hud.classList.remove("pm-hot", "pm-danger");
     combo = 0;
     pasteBonus = 0;
     keyLog.length = 0;
@@ -1599,9 +1751,25 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
         action:{label:"View gallery",onClick:()=>window.dispatchEvent(new Event("power-mode:gallery"))},
       });
       if(!settings.enabled||getReducedMotion())return;
-      const hue={Human:48,Agent:190,Together:300}[first.category];
-      if(settings.particles){attach();burst(window.innerWidth-120,90,first.category==="Agent"?24:36,hue,6,"spark");ring(window.innerWidth-120,90,hue,first.category==="Together"?100:70,450);start();}
+      // Secrets are gold; otherwise the category picks the color.
+      const hue=first.hidden?45:{Human:48,Agent:190,Together:300}[first.category];
+      attach();
+      // With particles off the toast is the whole feedback; no overlay banner.
+      const el=settings.particles?badgeBanner(first,batch.length-1,hue):null;
+      const r=el?el.getBoundingClientRect():null;
+      const cx=r&&r.width?r.left+r.width/2:window.innerWidth/2;
+      const cy=r&&r.height?r.bottom:window.innerHeight*0.2;
+      if(settings.particles){
+        const mult=INTENSITY[settings.intensity].particles;
+        burst(cx,cy,hue,(first.category==="Together"?90:60)*mult,8);
+        burst(cx,cy,(hue+40)%360,30*mult,5,"ember");
+        ring(cx,cy,hue,first.category==="Together"?260:200,650);
+        if(first.hidden)ring(cx,cy,(hue+30)%360,140,500);
+        if(settings.ghostLetters)for(let i=0;i<5;i++)glyph(cx+rand(-60,60),cy,hue,first.icon,1.2);
+      }
+      screenShake(first.hidden?6:4);
       if(settings.sound)synth.chime();
+      start();
     },150);
   }
   setUnlockHandler(onUnlock);
@@ -2465,7 +2633,10 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
     if (combo > 0) {
       const left = 1 - (now - lastKeyAt) / COMBO_TIMEOUT_MS;
       if (left <= 0) endCombo();
-      else hudFill.style.transform = `scaleX(${left.toFixed(3)})`;
+      else {
+        hudFill.style.transform = `scaleX(${left.toFixed(3)})`;
+        hud.classList.toggle("pm-danger", left < 0.3 && combo >= 10 && !getReducedMotion());
+      }
     } else if (agentHudActive) {
       const left = 1 - (now - lastAgentAt) / AGENT_TIMEOUT_MS;
       // End when the bar runs out even if the turn is still going (tool calls,
@@ -2508,6 +2679,7 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.globalCompositeOperation = glowBlend();
       const g = theme.gravity;
+      const floor = window.innerHeight - 2;
       let w = 0;
       let textAlive = 0;
       for (let i = 0; i < particles.length; i++) {
@@ -2536,8 +2708,22 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
             p.vx *= Math.pow(0.97, step);
             p.x += p.vx * step;
             p.y += p.vy * step;
+            if (p.y > floor && p.vy > 0) { p.y = floor; p.vy *= -0.45; p.vx *= 0.8; }
             const r = p.size * (0.4 + t * 0.6) * 3.2;
             const sprite = glowSprite(p.hue);
+            // Fast sparks leave a short streak behind them (cheap motion blur).
+            const speed = Math.hypot(p.vx, p.vy);
+            if (p.kind === "spark" && speed > 3) {
+              ctx.globalAlpha = t * 0.55;
+              ctx.strokeStyle = hsl(p.hue, 70);
+              ctx.lineWidth = Math.max(1, p.size * 0.8);
+              ctx.lineCap = "round";
+              ctx.beginPath();
+              ctx.moveTo(p.x - p.vx * 2.4, p.y - p.vy * 2.4);
+              ctx.lineTo(p.x, p.y);
+              ctx.stroke();
+              ctx.lineCap = "butt";
+            }
             ctx.globalAlpha = t;
             ctx.drawImage(sprite, p.x - r, p.y - r, r * 2, r * 2);
             if (useBloom && bctx) {
@@ -2551,6 +2737,7 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
             p.vy += 0.22 * g * step;
             p.x += p.vx * step;
             p.y += p.vy * step;
+            if (p.y > floor && p.vy > 0) { p.y = floor; p.vy *= -0.6; p.vx *= 0.85; }
             ctx.globalCompositeOperation = "source-over";
             ctx.globalAlpha = t > 0.25 ? 1 : t * 4; // 8-bit: no gradual fade until the end
             ctx.fillStyle = hsl(p.hue, 55);
@@ -2601,6 +2788,7 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
             p.vx *= Math.pow(0.97, step);
             p.x += p.vx * step;
             p.y += p.vy * step;
+            if (p.y > floor && p.vy > 0) { p.y = floor; p.vy *= -0.4; p.vx *= 0.7; p.spin *= 0.5; }
             p.angle += p.spin * step;
             const cos = Math.cos(p.angle) * DPR;
             const sin = Math.sin(p.angle) * DPR;
@@ -2609,6 +2797,26 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
             ctx.fillStyle = hsl(p.hue, 55);
             ctx.fillRect(-p.size / 2, -p.size / 6, p.size, p.size / 3);
             ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+            break;
+          }
+          case "smoke": {
+            p.vy -= 0.004 * step;
+            p.vx *= Math.pow(0.985, step);
+            p.x += (p.vx + Math.sin(p.life / 220 + p.angle) * 0.15) * step;
+            p.y += p.vy * step;
+            p.size += 0.22 * step;
+            // Fade in, then out; never into the bloom layer.
+            const a = Math.sin(Math.PI * (1 - t)) * (lightMode ? 0.55 : 0.45);
+            ctx.globalCompositeOperation = "source-over";
+            ctx.globalAlpha = a;
+            if (theme.shape === "pixel") {
+              ctx.fillStyle = lightMode ? "#4a4a55" : "#b8b8c8";
+              const s = Math.round(p.size / 6) * 4;
+              ctx.fillRect(Math.round(p.x / 4) * 4 - s / 2, Math.round(p.y / 4) * 4 - s / 2, s, s);
+            } else {
+              ctx.drawImage(smokeSprite(), p.x - p.size, p.y - p.size, p.size * 2, p.size * 2);
+            }
+            ctx.globalCompositeOperation = glowBlend();
             break;
           }
           case "ring": {
