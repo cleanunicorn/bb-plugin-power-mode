@@ -220,7 +220,7 @@ const LEGACY: (Omit<Achievement, "category" | "hidden" | "requires"> & {
     id: "bombardier",
     icon: "💣",
     title: "Bombardier",
-    description: "Drop tier 5 ordnance: paste 2,000 characters or more.",
+    description: "Drop tier 5 ordnance: paste 2,000 characters, or get a lucky drop from 600.",
     flavor: "The bomber run has been authorized.",
     requires: ["ordnance-stats"],
     check: (s) => s.bestPasteTier >= 5,

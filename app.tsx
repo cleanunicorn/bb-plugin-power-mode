@@ -397,10 +397,12 @@ function Meter({
   value,
   color,
   className,
+  label,
 }: {
   value: number;
   color: string;
   className?: string;
+  label: string;
 }) {
   return (
     <div
@@ -409,6 +411,7 @@ function Meter({
         className,
       )}
       role="progressbar"
+      aria-label={label}
       aria-valuemin={0}
       aria-valuemax={100}
       aria-valuenow={Math.round(value * 100)}
@@ -480,6 +483,7 @@ export function StatsAndAchievements() {
           value={completion}
           color={completion >= 1 ? SECRET_COLOR : CATEGORY_COLOR.Agent}
           className="h-2"
+          label="Collection completion"
         />
         <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
           {(["Human", "Agent", "Together"] as const).map((c) => {
@@ -665,7 +669,12 @@ export function StatsAndAchievements() {
                   <p className="text-xs">{challengeProgress(a.id, stats)}</p>
                 )}
                 {ratio !== null && (
-                  <Meter value={ratio} color={color} className="mt-1 h-1" />
+                  <Meter
+                    value={ratio}
+                    color={color}
+                    className="mt-1 h-1"
+                    label={`${a.title} progress`}
+                  />
                 )}
                 {!a.hidden && (
                   <button

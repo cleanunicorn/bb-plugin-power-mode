@@ -382,7 +382,7 @@ const CSS = `
   86%{opacity:1;transform:translate(-50%,0) scale(1)}100%{opacity:0;transform:translate(-50%,-28px) scale(.96)}}
 @keyframes pm-sheen{to{transform:translateX(130%)}}
 @keyframes pm-badge-icon{0%{transform:scale(0) rotate(-40deg)}100%{transform:scale(1) rotate(0)}}
-.pm-retro .pm-badge-title,.pm-badge.pm-retro{font-style:normal;border-radius:0}
+.pm-badge.pm-retro .pm-badge-title{font-style:normal}.pm-badge.pm-retro{border-radius:0}
 .pm-badge.pm-light{color:#111;background:linear-gradient(135deg,rgba(255,255,255,.97),rgba(243,242,255,.94));box-shadow:0 0 0 1px rgba(0,0,0,.06),0 0 30px var(--pm-glow),0 14px 40px rgba(0,0,0,.18)}
 .pm-badge.pm-light .pm-badge-kicker{color:var(--pm-deep)}
 @keyframes pm-slam{
@@ -1754,10 +1754,11 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
       // Secrets are gold; otherwise the category picks the color.
       const hue=first.hidden?45:{Human:48,Agent:190,Together:300}[first.category];
       attach();
-      const el=badgeBanner(first,batch.length-1,hue);
-      const r=el.getBoundingClientRect();
-      const cx=r.width?r.left+r.width/2:window.innerWidth/2;
-      const cy=r.height?r.bottom:window.innerHeight*0.2;
+      // With particles off the toast is the whole feedback; no overlay banner.
+      const el=settings.particles?badgeBanner(first,batch.length-1,hue):null;
+      const r=el?el.getBoundingClientRect():null;
+      const cx=r&&r.width?r.left+r.width/2:window.innerWidth/2;
+      const cy=r&&r.height?r.bottom:window.innerHeight*0.2;
       if(settings.particles){
         const mult=INTENSITY[settings.intensity].particles;
         burst(cx,cy,hue,(first.category==="Together"?90:60)*mult,8);
