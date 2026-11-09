@@ -3,7 +3,7 @@
 ```sh
 npm ci
 npm run typecheck     # tsc over the plugin sources
-npm run test:unit     # vitest: lib/power-store and lib/power-stats (tests/unit)
+npm run test:unit     # vitest: lib/power-store, lib/settings-sync, lib/power-stats and the server RPC (tests/unit)
 npm run test:browser  # all tests/*.browser.js fixtures, end to end
 npm test              # unit + browser
 ```
