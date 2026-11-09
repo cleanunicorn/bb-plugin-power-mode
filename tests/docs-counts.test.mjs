@@ -18,7 +18,7 @@ test("achievement count matches ACHIEVEMENTS", () => {
 });
 
 test("README lists one theme per THEME_IDS entry", () => {
-  const src = read("lib/power-store.ts");
+  const src = read("lib/power-settings.ts");
   const ids = src.match(/THEME_IDS: readonly ThemeId\[\] = \[([^\]]*)\]/)[1].split(",").filter((s) => s.trim());
   const line = readme.split("\n").find((l) => l.includes("**Themes:**"));
   const names = line.split("**Themes:**")[1].split(",");

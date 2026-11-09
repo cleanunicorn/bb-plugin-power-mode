@@ -7,12 +7,14 @@
 // - An invisible app overlay feeds live thread status to Agent Power Mode.
 // - The plugin's Settings page has themes, particle/glow sliders, effect
 //   toggles, lifetime stats, and achievements.
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { ReactNode } from "react";
 import {
   definePluginApp,
   experimental_useSidebarThreads,
   useBbContext,
+  useRealtime,
+  useRpc,
 } from "@get-bb/plugin-sdk/app";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -51,6 +53,13 @@ import {
 } from "./lib/achievement-presentation";
 import { getCollection, setCollectionPreference } from "./lib/power-stats";
 import { THEMES } from "@/lib/power-themes";
+import { startSettingsSync, type SettingsSync } from "@/lib/settings-sync";
+import type { rpcContract } from "./server";
+
+/** Realtime channel the server announces saved-settings changes on (see server.ts). */
+const SETTINGS_CHANGED_CHANNEL = "settings-changed";
+/** Identifies this window's saves so it ignores its own change signals. */
+const CLIENT_ID = Math.random().toString(36).slice(2, 12);
 
 function usePowerSettings(): PowerSettings {
   return useSyncExternalStore(subscribePowerSettings, getPowerSettings);
@@ -58,6 +67,40 @@ function usePowerSettings(): PowerSettings {
 
 function usePowerStats() {
   return useSyncExternalStore(subscribePowerStats, getPowerStats);
+}
+
+/**
+ * Renders nothing. Saves settings to the bb server and applies settings saved
+ * from other browsers and devices (see lib/settings-sync.ts).
+ */
+function SettingsSyncer() {
+  const rpcRef = useRef(useRpc<typeof rpcContract>());
+  const sync = useRef<SettingsSync | null>(null);
+  useEffect(() => {
+    const rpc = rpcRef.current;
+    const controller = new AbortController();
+    sync.current = startSettingsSync(
+      {
+        load: async () => (await rpc.call("settings.get")).settings,
+        save: async (settings) => {
+          await rpc.call("settings.set", { settings: { ...settings }, clientId: CLIENT_ID });
+        },
+      },
+      {
+        signal: controller.signal,
+        onError: (error) => console.warn("[power-mode] settings sync failed", error),
+      },
+    );
+    return () => {
+      controller.abort();
+      sync.current = null;
+    };
+  }, []);
+  useRealtime(SETTINGS_CHANGED_CHANNEL, (payload) => {
+    const from = (payload as { clientId?: unknown } | null)?.clientId;
+    if (from !== CLIENT_ID) sync.current?.refresh();
+  });
+  return null;
 }
 
 const RUNNING_STATUSES = new Set(["active", "starting", "pending"]);
@@ -188,7 +231,8 @@ function SettingsSection() {
           </div>
           <p className="text-xs text-muted-foreground">
             Toggle any time with the ⚡ button in the sidebar footer, or “Power
-            Mode: Toggle” in the command palette. Saved per browser window.
+            Mode: Toggle” in the command palette. Settings are saved on your bb
+            server and follow you to every browser and device.
           </p>
         </div>
         <Button
@@ -739,6 +783,10 @@ export default definePluginApp((app) => {
     run: () => togglePowerMode(),
   });
 
+  app.slots.experimental_appOverlay({
+    id: "settings-sync",
+    component: SettingsSyncer,
+  });
   app.slots.experimental_appOverlay({
     id: "agent-watcher",
     component: AgentWatcher,

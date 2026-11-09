@@ -1,100 +1,47 @@
 // Power Mode preferences, shared by the effects engine (content script) and
-// the settings UI. Stored in the bb origin's localStorage (shared by every
-// window in a browser profile), keyed by the plugin id, and synced across open
-// windows through the `storage` event.
+// the settings UI. A copy lives in the bb origin's localStorage (shared by
+// every window in a browser profile, keyed by the plugin id, synced across open
+// windows through the `storage` event) so effects start instantly; the saved
+// copy lives on the bb server and is kept in step by lib/settings-sync.ts.
 
-export type Intensity = "epic" | "legendary" | "godlike";
-export type ThemeId = "neon" | "fire" | "matrix" | "sakura" | "cyberpunk" | "retro";
-export const THEME_IDS: readonly ThemeId[] = ["neon", "fire", "matrix", "sakura", "cyberpunk", "retro"];
+import { DEFAULT_SETTINGS, sameSettings, sanitizeSettings, type PowerSettings } from "./power-settings";
 
-export interface PowerSettings {
-  enabled: boolean;
-  particles: boolean;
-  intensity: Intensity;
-  shake: boolean;
-  screenShake: boolean;
-  sound: boolean;
-  ghostLetters: boolean;
-  lightning: boolean;
-  /** React to agents writing replies in the transcript. */
-  agentMode: boolean;
-  /** Keep effects off the text box being typed in (and the streaming agent reply). */
-  protectText: boolean;
-  theme: ThemeId;
-  /** Particle count multiplier, 0.25–3. */
-  density: number;
-  /** Bloom strength, 0–1 (0 turns the bloom layer off). */
-  glow: number;
-  bestCombo: number;
-  /**
-   * Reduce motion: no shake, no full-screen flashes, no lightning. `null`
-   * follows the OS `prefers-reduced-motion` setting; `true`/`false` is an
-   * explicit user override that wins over the OS from then on.
-   */
-  reduceMotion: boolean | null;
-}
-
-export const DEFAULT_SETTINGS: PowerSettings = {
-  enabled: false,
-  particles: true,
-  intensity: "legendary",
-  shake: true,
-  screenShake: true,
-  sound: false,
-  ghostLetters: true,
-  lightning: true,
-  agentMode: true,
-  protectText: true,
-  theme: "neon",
-  density: 1,
-  glow: 0.7,
-  bestCombo: 0,
-  reduceMotion: null,
-};
-
-export const DENSITY_RANGE = { min: 0.25, max: 3 } as const;
-
-const INTENSITIES: readonly Intensity[] = ["epic", "legendary", "godlike"];
+export {
+  DEFAULT_SETTINGS,
+  DENSITY_RANGE,
+  THEME_IDS,
+  sanitizeSettings,
+  type Intensity,
+  type PowerSettings,
+  type ThemeId,
+} from "./power-settings";
 
 let storageKey = "bb-plugin-power-mode:settings";
 let keyPrefix = "bb-plugin-power-mode";
 let state: PowerSettings = DEFAULT_SETTINGS;
 let initialized = false;
 const listeners = new Set<() => void>();
+const localChangeListeners = new Set<(keys: (keyof PowerSettings)[]) => void>();
+let resolveReady: () => void = () => {};
+/** Resolves once `initPowerStore` has loaded the local copy. */
+export const powerStoreReady: Promise<void> = new Promise((resolve) => {
+  resolveReady = resolve;
+});
 
-/** Persisted values are untrusted: keep only well-typed fields. */
 function parse(raw: string | null): PowerSettings {
   if (!raw) return DEFAULT_SETTINGS;
   try {
-    const value: unknown = JSON.parse(raw);
-    if (!value || typeof value !== "object") return DEFAULT_SETTINGS;
-    const v = value as Record<string, unknown>;
-    const bool = (key: keyof PowerSettings) =>
-      typeof v[key] === "boolean" ? (v[key] as boolean) : (DEFAULT_SETTINGS[key] as boolean);
-    const num = (key: "density" | "glow", min: number, max: number) =>
-      typeof v[key] === "number" && Number.isFinite(v[key])
-        ? Math.min(max, Math.max(min, v[key] as number))
-        : DEFAULT_SETTINGS[key];
-    const best = typeof v.bestCombo === "number" && Number.isFinite(v.bestCombo) ? Math.max(0, Math.floor(v.bestCombo)) : 0;
-    return {
-      enabled: bool("enabled"),
-      particles: bool("particles"),
-      intensity: INTENSITIES.includes(v.intensity as Intensity) ? (v.intensity as Intensity) : DEFAULT_SETTINGS.intensity,
-      shake: bool("shake"),
-      screenShake: bool("screenShake"),
-      sound: bool("sound"),
-      ghostLetters: bool("ghostLetters"),
-      lightning: bool("lightning"),
-      agentMode: bool("agentMode"),
-      protectText: bool("protectText"),
-      theme: THEME_IDS.includes(v.theme as ThemeId) ? (v.theme as ThemeId) : DEFAULT_SETTINGS.theme,
-      density: num("density", DENSITY_RANGE.min, DENSITY_RANGE.max),
-      glow: num("glow", 0, 1),
-      bestCombo: best,
-      reduceMotion: typeof v.reduceMotion === "boolean" ? v.reduceMotion : null,
-    };
+    return sanitizeSettings(JSON.parse(raw));
   } catch {
     return DEFAULT_SETTINGS;
+  }
+}
+
+function writeLocal() {
+  try {
+    window.localStorage.setItem(storageKey, JSON.stringify(state));
+  } catch {
+    // Storage full or blocked: keep the in-memory value.
   }
 }
 
@@ -113,6 +60,7 @@ export function initPowerStore(pluginId: string) {
   } catch {
     state = DEFAULT_SETTINGS;
   }
+  resolveReady();
 }
 
 /** Keeps every tab/window in sync. Returns a disposer. */
@@ -170,14 +118,38 @@ export function getPowerSettings(): PowerSettings {
   return state;
 }
 
+/** A change made in this window: persisted locally and announced for the server sync. */
 export function updatePowerSettings(patch: Partial<PowerSettings>) {
   state = { ...state, ...patch };
-  try {
-    window.localStorage.setItem(storageKey, JSON.stringify(state));
-  } catch {
-    // Storage full or blocked: keep the in-memory value.
-  }
+  writeLocal();
   emit();
+  const keys = Object.keys(patch) as (keyof PowerSettings)[];
+  for (const listener of localChangeListeners) listener(keys);
+}
+
+/**
+ * Applies settings loaded from the server (untrusted). Updates the local copy
+ * but is not reported as a local change, so it is never echoed back.
+ * Returns whether anything changed.
+ */
+export function applyRemotePowerSettings(value: unknown): boolean {
+  const next = sanitizeSettings(value);
+  if (sameSettings(next, state)) return false;
+  state = next;
+  writeLocal();
+  emit();
+  return true;
+}
+
+/**
+ * Fires only for changes made in this window (not other tabs or the server),
+ * with the names of the fields that were set.
+ */
+export function subscribeLocalSettingsChanges(listener: (keys: (keyof PowerSettings)[]) => void) {
+  localChangeListeners.add(listener);
+  return () => {
+    localChangeListeners.delete(listener);
+  };
 }
 
 export function subscribePowerSettings(listener: () => void) {

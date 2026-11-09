@@ -5,3 +5,5 @@ export const useComposer = () => ({});
 export const useSdk = () => ({});
 export const useBbNavigate = () => ({ toPluginPanel: () => {} });
 export const experimental_Icon = () => null;
+export const useRpc = () => ({ call: async () => ({ settings: null }) });
+export const useRealtime = () => {};
