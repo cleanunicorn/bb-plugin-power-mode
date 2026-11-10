@@ -28,4 +28,4 @@ Power Mode is a frontend-only plugin. It has no CLI commands or agent tools.
   rockets, carpet bombing (2k+), orbital strike, meteor shower, tactical nuke (60k+),
   singularity (≥ 200k). Tiers 7–9 run one at a time. Pastes with no text (images,
   files) get the plain paste burst. There is no separate setting: it follows
-  enabled/intensity/lightning/screen shake/sound. A "Reduce motion" setting (default: follow the OS `prefers-reduced-motion`, overridable) turns off shake, full-screen flashes and lightning. Terminal pastes are ignored.
+  enabled/intensity/lightning/screen shake/sound/vibration. Vibration (on by default) buzzes supporting phones (Android Chromium browsers; not iOS Safari or Firefox) only on big moments: milestones, records, combo lost, nukes, singularities, badge unlocks and agent finales. A "Reduce motion" setting (default: follow the OS `prefers-reduced-motion`, overridable) turns off shake, full-screen flashes and lightning. Terminal pastes are ignored.

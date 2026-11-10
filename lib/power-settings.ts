@@ -13,6 +13,8 @@ export interface PowerSettings {
   shake: boolean;
   screenShake: boolean;
   sound: boolean;
+  /** Vibrate the device on big moments (phones that support the Vibration API). */
+  haptics: boolean;
   ghostLetters: boolean;
   lightning: boolean;
   /** React to agents writing replies in the transcript. */
@@ -40,6 +42,7 @@ export const DEFAULT_SETTINGS: PowerSettings = {
   shake: true,
   screenShake: true,
   sound: false,
+  haptics: true,
   ghostLetters: true,
   lightning: true,
   agentMode: true,
@@ -76,6 +79,7 @@ export function sanitizeSettings(value: unknown): PowerSettings {
     shake: bool("shake"),
     screenShake: bool("screenShake"),
     sound: bool("sound"),
+    haptics: bool("haptics"),
     ghostLetters: bool("ghostLetters"),
     lightning: bool("lightning"),
     agentMode: bool("agentMode"),
