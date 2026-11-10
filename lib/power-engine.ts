@@ -2198,10 +2198,39 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
   let pendingPaste: PendingPaste | null = null;
   const PASTE_SLOT_MS = 1000;
 
+  // Some OS dictation/paste tools emit null data (or insertReplacementText).
+  // Keep only a transient editor baseline so we can measure the inserted span,
+  // including replacements, rather than guessing one character per event.
+  const editorTexts = new WeakMap<HTMLElement, string>();
+  const editorText = (target: HTMLElement) =>
+    target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement
+      ? target.value : target.textContent ?? "";
+  function rememberEditor(event: Event) {
+    const target = editableTarget(event.composedPath()[0] ?? event.target);
+    if (target) editorTexts.set(target, editorText(target));
+  }
+  document.addEventListener("focusin", rememberEditor, { capture: true, signal });
+  document.addEventListener("beforeinput", rememberEditor, { capture: true, signal });
+  const initialEditor = editableTarget(document.activeElement);
+  if (initialEditor) editorTexts.set(initialEditor, editorText(initialEditor));
+  function insertedLength(before: string, after: string): number {
+    let start = 0;
+    while (start < before.length && start < after.length && before[start] === after[start]) start++;
+    let oldEnd = before.length, newEnd = after.length;
+    while (oldEnd > start && newEnd > start && before[oldEnd - 1] === after[newEnd - 1]) { oldEnd--; newEnd--; }
+    return newEnd - start;
+  }
+  function matchingPaste(target: HTMLElement): PendingPaste | null {
+    const slot = pendingPaste;
+    return slot && performance.now() - slot.at < PASTE_SLOT_MS &&
+      (slot.target === target || slot.target.contains(target) || target.contains(slot.target)) ? slot : null;
+  }
+
   function onPasteCapture(event: Event) {
     if (!settings.enabled) return;
     const target = editableTarget(event.composedPath()[0] ?? event.target);
     if (!target) return;
+    editorTexts.set(target, editorText(target));
     const data = (event as ClipboardEvent).clipboardData ?? (event as DragEvent).dataTransfer ?? null;
     let chars = 0;
     try {
@@ -2218,6 +2247,7 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
       // and insert the text themselves, so no input event follows.
       if (slot.epoch !== ordnanceEpoch || !settings.enabled || !slot.event.defaultPrevented || slot.chars === 0) return;
       if (!slot.target.isConnected || editableTarget(slot.target) !== slot.target) return;
+      editorTexts.set(slot.target, editorText(slot.target));
       attach();
       const caret = caretOf(slot.target);
       if (caret) react(slot.target, caret, { deleting: false, newline: false, pasted: true, data: null, chars: slot.chars });
@@ -2226,17 +2256,15 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
   document.addEventListener("paste", onPasteCapture, { capture: true, signal });
   document.addEventListener("drop", onPasteCapture, { capture: true, signal });
 
-  function pasteLength(target: HTMLElement, event: InputEvent): number {
-    const slot = pendingPaste;
-    if (slot && performance.now() - slot.at < PASTE_SLOT_MS &&
-        (slot.target === target || slot.target.contains(target) || target.contains(slot.target))) {
+  function pasteLength(target: HTMLElement, event: InputEvent, inserted: number): number {
+    const slot = matchingPaste(target);
+    if (slot) {
       pendingPaste = null;
       return slot.chars;
     }
     const dropped = event.dataTransfer?.getData("text/plain").length;
     if (dropped) return dropped;
-    // Length unknown: treat as a short paste.
-    return event.data?.length || 1;
+    return event.data?.length || inserted;
   }
 
   function caretOf(target: HTMLElement): { x: number; y: number } | null {
@@ -2246,27 +2274,37 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
   }
 
   function onInput(event: Event) {
-    if (!settings.enabled) return;
     const target = editableTarget(event.composedPath()[0] ?? event.target);
     if (!target) return;
+    const previous = editorTexts.get(target);
+    const text = editorText(target);
+    editorTexts.set(target, text);
+    if (!settings.enabled) return;
     const inputEvent = event as InputEvent;
     const inputType = inputEvent.inputType ?? "insertText";
-    if (inputType.startsWith("history") || inputType === "insertReplacementText") return;
+    if (inputType.startsWith("history")) return;
     const deleting = inputType.startsWith("delete");
     const newline = inputType === "insertParagraph" || inputType === "insertLineBreak" || inputEvent.data === "\n";
-    const pasted = inputType === "insertFromPaste" || inputType === "insertFromDrop";
-    const chars = pasted ? pasteLength(target, inputEvent) : 0;
+    const pasted = inputType === "insertFromPaste" || inputType === "insertFromDrop" ||
+      (!deleting && matchingPaste(target) !== null);
+    const inserted = inputEvent.data == null && !deleting && !matchingPaste(target) && previous !== undefined
+      ? insertedLength(previous, text) : 0;
+    const chars = deleting ? 0 : pasted ? pasteLength(target, inputEvent, inserted)
+      : inputEvent.data?.length ?? (newline || previous === undefined ? 1 : inserted);
+    // Bulk input and corrections have no per-key timing. Keep their full
+    // character count without manufacturing a typing-speed record.
+    const timed = !pasted && inputType !== "insertReplacementText" && chars === 1;
 
     attach();
     // Read layout once, before any writes in this handler.
     const caret = caretOf(target);
     if (!caret) return;
-    react(target, caret, { deleting, newline, pasted, data: inputEvent.data, chars });
+    react(target, caret, { deleting, newline, pasted, data: inputEvent.data, chars, timed });
   }
 
   function react(
     target: HTMLElement, caret: { x: number; y: number },
-    ev: { deleting: boolean; newline: boolean; pasted: boolean; data: string | null; chars: number },
+    ev: { deleting: boolean; newline: boolean; pasted: boolean; data: string | null; chars: number; timed?: boolean },
   ) {
     const { deleting, newline, pasted, data } = ev;
     const now = performance.now();
@@ -2283,7 +2321,7 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
     const bump = pick ? pick.combo : pasted ? 10 : 1;
     combo += bump;
     if (pasted) pasteBonus += Math.max(0, bump - 10);
-    const typed = deleting || pasted ? 0 : Math.max(1, data?.length ?? 1);
+    const typed = ev.timed ? ev.chars : 0;
     if (typed) keyLog.push({ t: now, n: typed });
 
     const tune = INTENSITY[settings.intensity];
@@ -2356,12 +2394,12 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
     const earned = combo - pasteBonus;
     recordStats((s) => ({
       ...s,
-      chars: s.chars + typed,
+      chars: s.chars + ev.chars,
       deletes: s.deletes + (deleting ? 1 : 0),
       pastes: s.pastes + (pasted ? 1 : 0),
       clutches: s.clutches + (clutch ? 1 : 0),
       bestCombo: Math.max(s.bestCombo, earned),
-      bestWpm: keyLog.length >= 15 ? Math.max(s.bestWpm, speed) : s.bestWpm,
+      bestWpm: typed > 0 && keyLog.length >= 15 ? Math.max(s.bestWpm, speed) : s.bestWpm,
     }), { typed: typed > 0 });
     start();
   }
