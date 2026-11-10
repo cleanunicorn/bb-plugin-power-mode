@@ -1,71 +1,83 @@
-# Demo video
+# Retro 8-bit demo
 
-[`media/power-mode-demo.mp4`](media/power-mode-demo.mp4) is an 84-second, 1280×800 H.264 recording of the real plugin running in bb. It has no audio, because Sound is off by default. [`media/power-mode-demo-poster.jpg`](media/power-mode-demo-poster.jpg) is a still from 0:25, which the README uses as a thumbnail. Both are committed to the repository.
+[Watch the demo](media/power-mode-demo.mp4?raw=true) · [Motion preview](media/power-mode-preview.gif) · [Poster](media/power-mode-demo-poster.jpg)
 
-GitHub's file view doesn't play MP4s inline, so the README links to the committed file through jsDelivr, pinned to the commit that added it:
+A 47-second, 1260×740, 30 fps H.264 recording of the real Power Mode plugin in bb. Silent, with flashing effects and screen shake. The README uses a five-second GIF so the effects play directly in GitHub Markdown; clicking it opens the repository MP4. These relative links follow the branch being viewed rather than pointing at an older published demo.
 
-https://cdn.jsdelivr.net/gh/cleanunicorn/bb-plugin-power-mode@81cac1e19cfeefbdefe92c90ce5973d0f70b509c/docs/media/power-mode-demo.mp4
+## Loadout
 
-jsDelivr serves the file as `video/mp4`, so browsers play it directly without signing in.
+Power Mode on, **Godlike**, **Retro 8-bit**, **Particles 1.5×**, **Glow 70%**, **Agent Power Mode on**. Sound off. Reduce motion follows the recording environment's system setting (off). The first scene shows the selected controls. Retro deliberately skips bloom for crisp pixels, even with Glow set to 70%.
 
-## What it shows
+## Scenes
 
-| Time | Scene |
-|---|---|
-| 0:00 | Intro caption on the bb home screen |
-| 0:04 | 1 · Click ⚡ **Toggle Power Mode** in the sidebar footer |
-| 0:07 | 2 · Type a sentence in the composer: particles, editor shake, flying letters, combo counter with WPM, milestone slams. Then 30 Backspaces for red shards |
-| 0:20 | 3 · Paste ordnance: ~120 chars (dynamite), 1,026 chars (rocket barrage), 3,015 chars (carpet bombing) |
-| 0:36 | 4 · Settings → Power Mode: switch the theme from Neon to 🔥 Inferno; point at the **Agent Power Mode** checkbox (on by default) |
-| 0:50 | 5 · Pick the `bb-plugin-power-mode` project, type an agent prompt with the Inferno theme, send it |
-| 1:05 | The agent reply streams with sparks and the AGENT word combo ("AGENT IS COOKING"), then the **TURN COMPLETE** finale plays |
-| 1:20 | Outro caption |
+| Time | What actually happens |
+| --- | --- |
+| 0:00–0:04 | The selected intensity, theme and exact slider values |
+| 0:04–0:20 | Native typing stays visible as the combo builds to GODLIKE; pixel effects and milestone slams |
+| 0:20–0:26 | A native 3,330-character paste triggers carpet bombing, BOMBER RUN and the Bombardier unlock |
+| 0:26–0:36 | The end of typing the agent prompt, then submission |
+| 0:36–0:43 | An actual agent reply streams: AGENT IS COOKING and TURN COMPLETE fireworks |
+| 0:43–0:47 | “YOUR NEXT TASK IS A BOSS FIGHT. EQUIP POWER MODE.” |
 
-The yellow ring is a cursor marker added for the recording. The dark captions are an overlay injected by the script. Neither comes from the plugin.
+The opening typing scene was re-recorded in the same profile after its introductory badges had already been earned. This prevents repeated first-time achievement banners from covering the composer. The sentence starts more slowly to make the connection between keystrokes and effects clear. No banners were digitally erased or restyled; the original paste scene still shows the Bombardier celebration.
+
+Idle time and navigation are cut. Retained footage plays at real speed. The magenta-bordered captions and sidebar blur are recording overlays, not plugin features. No effects, replies, achievement unlocks or WPM values were fabricated. Automated keystrokes demonstrate visuals; their displayed WPM is not a human speed benchmark. Physical haptics cannot be conveyed by this video.
 
 ## Capture environment
 
-- bb 0.49.0 at `http://127.0.0.1:38886`, Linux, headless Google Chrome 155 at 1280×800
-- Power Mode installed from `git:https://github.com/cleanunicorn/bb-plugin-power-mode` at `017a745` (Merge PR #22)
-- A fresh Chrome profile, so Power Mode starts from its defaults: Legendary intensity, Neon theme, Agent Power Mode on, Sound off
-- Agent turn: a new thread in the `bb-plugin-power-mode` project (Project checkout, Claude Sonnet, Medium), prompt *"Without using any tools, write three short upbeat paragraphs (about 200 words total) about why typing with particle effects is fun."*
-- puppeteer-core 24.43.1, ffmpeg 8.1
+- Recorded 2026-11-10 with the installed plugin at `89e6b8926d22e280a2d89af1d49ddb5e01e24fe0`.
+- BetterWright, isolated `power-mode-video` browser profile, headed Chromium on Xvfb `:98`.
+- 1260×740 browser viewport; ffmpeg records that viewport at display offset `10,130`.
+- An actual Codex agent turn in the `bb-plugin-power-mode` project. The demo thread is archived after capture. No repository changes were requested from it.
+- Prompt: “No tools or file changes. Write 180 words of arcade announcer hype about a coder and an AI teammate defeating a backlog with pixel fireworks. Three short paragraphs. Start with PLAYER TWO READY.”
+- The server already had the requested preset. No effect settings were changed. Settings are server-synchronized; a fresh browser profile does **not** isolate them.
 
-## Reproduce or update
+## Record a new take
 
-1. Run bb with the plugin installed, and pick a sidebar project for the agent turn (default `bb-plugin-power-mode`).
-2. Record. The script uses a throwaway Chrome profile, so your own Power Mode settings are untouched.
-
-   ```sh
-   mkdir -p /tmp/pm-demo && cd /tmp/pm-demo
-   npm i --no-save puppeteer-core@24
-   cp <repo>/scripts/demo/record.mjs <repo>/scripts/demo/encode.mjs .
-   # dry run (types the prompt but does not send it):
-   node record.mjs frames
-   # real take, sends the prompt and waits for the turn to finish:
-   SEND=1 node record.mjs frames
-   ```
-
-   Optional environment variables are `BB_URL`, `CHROME`, and `DEMO_PROJECT`. The script blurs the sidebar's project and thread lists and the project picker's options, so the recording doesn't show other projects.
-3. Encode. The frames come from the CDP screencast and arrive only when the screen changes. `encode.mjs` keeps their real timing:
+1. Use BetterWright with an isolated profile. Inspect the real UI before acting; open Settings → Power Mode, select the loadout and verify the controls. Preserve the user's previous settings if changing them.
+2. On Linux, a virtual display can capture the headed browser without exposing another desktop:
 
    ```sh
-   node encode.mjs frames
-   ffmpeg -f concat -safe 0 -i frames/list.txt -vf "fps=30,format=yuv420p" \
-     -c:v libx264 -crf 26 -preset slow -movflags +faststart power-mode-demo.mp4
-   ffmpeg -ss 25 -i power-mode-demo.mp4 -frames:v 1 -vf scale=960:-1 -q:v 4 power-mode-demo-poster.jpg
+   Xvfb :98 -screen 0 1280x900x24 -nolisten tcp -extension GLX -extension RENDER
+   DISPLAY=:98 betterwright run --headed --profile power-mode-video \
+     -c "await page.setViewportSize({width:1260,height:740}); await page.goto('http://127.0.0.1:38886'); return await snapshot({interactive:true})"
    ```
-4. Archive the demo thread. Its ID is written to `frames/demo-thread.txt`: `bb thread archive <id>`.
-5. Replace the files in `docs/media/` and commit. Then point the README links at `https://cdn.jsdelivr.net/gh/cleanunicorn/bb-plugin-power-mode@<new commit sha>/docs/media/power-mode-demo.mp4`, using the full SHA of the commit that contains the new file. That commit must reach `main` (this repo merges PRs with merge commits, so branch commits are kept). Update the revision and timings above, and repeat the checks below.
 
-### Gotchas
+3. Inspect a full-display screenshot to confirm the viewport offset for your browser. Hide unrelated sidebar project/thread names before capture. Keep the sidebar present so the plugin can observe the demo thread's completion. Add clearly editorial captions if desired.
+4. Record while driving the browser through BetterWright:
 
-- Run the agent turn in a project that appears in the sidebar. The TURN COMPLETE finale fires when a sidebar thread goes from running to idle. A "No project" (personal workspace) thread isn't in the sidebar list, so it gets the streaming effects but no finale.
-- The paste uses the real clipboard (`navigator.clipboard.writeText` plus a Ctrl+V with the `Paste` editing command), so the composer receives a native paste event.
+   ```sh
+   ffmpeg -y -f x11grab -framerate 30 -video_size 1260x740 \
+     -i :98+10,130 -c:v libx264 -preset ultrafast -crf 18 \
+     -pix_fmt yuv420p /tmp/power-mode-take.mp4
+   ```
 
-## Verification of the committed video
+5. Type with real keyboard events. For the bomber, copy `('Ship the feature. Collect the pixels. ').repeat(90)` to the browser clipboard, then press Ctrl+V in the composer. Do not substitute a synthetic paste event. Clear that draft and send the short demo prompt in a new project thread. Capture the complete reply and finale.
+6. Stop ffmpeg cleanly with `q` or SIGINT. Inspect a contact sheet and select scene boundaries. [`scripts/demo/edit-retro.mjs`](../scripts/demo/edit-retro.mjs) contains the edit points for this take; update them for a new recording. The optional second input replaces the 16-second opening typing scene; the last argument is its start time. To reproduce the clearer cut, run:
 
-- `ffprobe` reports h264, 1280×800, 83.97 s. `ffmpeg -v error -i power-mode-demo.mp4 -f null -` decodes the whole file without errors. SHA-256 `2d519f990410254c26642a1690fb43f6b2edb65d939a86c27b2af9cae6d8c004`.
-- I checked frames from every scene: the toggle click, the combo counter (155 GODLIKE, "ON FIRE!", "NEW RECORD"), Backspace shards, dynamite sticks and the "OVERLOAD" slam, the rocket barrage ("NICE!"), carpet bombing, the Settings page with Inferno selected and the "INFERNO" slam, the agent combo ("AGENT IS COOKING", 117 words), and "TURN COMPLETE". Captions and controls are legible at 1280×800.
-- Unauthenticated playback: a fresh headless Chrome with no cookies opened the jsDelivr URL above. It got HTTP 200 with `video/mp4`, the SHA-256 matched, and a `<video>` element played to the end (`ended: true`, duration 83.97 s, 1280×800, no media error).
-- Privacy: the sidebar thread and project lists and the project picker are blurred, and the demo threads were archived. The workspace-provisioning log is on screen for about a second and shows the local checkout path.
+   ```sh
+   node scripts/demo/edit-retro.mjs /tmp/power-mode-take.mp4 /tmp/power-mode-clear-typing-2.mp4 3
+   ```
+
+7. Verify full-file decoding, inspect frames from every scene and check playback in a browser. Archive the demo thread, close the isolated browser session, and stop the virtual display. Commit the MP4, GIF, poster and updated scene notes together.
+
+The older `record.mjs` / `encode.mjs` scripts describe the previous Neon/Inferno capture. They were not used for this take. In particular, the old recorder's claim that a throwaway profile leaves server settings untouched is no longer valid.
+
+## Verification
+
+The exported MP4 reports H.264, 1260×740, 30 fps and 47.00 seconds. `ffmpeg -v error -i docs/media/power-mode-demo.mp4 -f null -` decodes it without errors. Frames were inspected for the exact controls, typing milestones, Bomber Run/Bombardier, agent streaming and TURN COMPLETE. The initial export passed browser playback. The revised opening and portrait export were checked with full-file decoding and scene-frame inspection. The README consistency checks pass for the badge count, six themes and all nine ordnance tiers.
+
+
+## Vertical edition
+
+[Watch the 9:16 video](media/power-mode-vertical.mp4?raw=true) · [Portrait poster](media/power-mode-vertical-poster.jpg)
+
+The portrait edition is 1080×1920 at 30 fps, with the same 47-second sequence and no audio. It reframes the existing recording: the blurred sidebar and original bottom captions are cropped away, while the composer, combo HUD and streamed reply remain in a wide gameplay panel. Large scene captions, the exact preset and an installation end card sit on a dark arcade background. This is a portrait edit of desktop footage, not a recording of the mobile layout.
+
+Regenerate it from the finished landscape MP4:
+
+```sh
+node scripts/demo/vertical.mjs
+```
+
+The script uses ffmpeg and DejaVu Sans Mono; set `DEMO_FONT` to another local font path if needed.
