@@ -14,8 +14,15 @@ Power Mode is a frontend-only plugin. It has no CLI commands or agent tools.
   editor/screen shake, flying letters, lightning, Agent Power Mode, sound, plus
   lifetime stats and achievements.
 - **Agent Power Mode** watches the transcript only while some thread is running.
-- State lives in each browser window's localStorage, so it is per device and syncs
-  across tabs in the same browser. An agent cannot toggle it.
+- Settings are saved on the bb server (plugin KV, key `settings`) and follow the user
+  to every browser and device on that server; each browser keeps a localStorage copy
+  for instant start. Read them with `bb plugin rpc call <plugin id> settings.get`.
+  Stats and achievements stay in the browser's localStorage and synchronize between
+  open windows on the same origin and browser profile. Counters and collection progress
+  merge, unlock notifications are deduplicated, and resets propagate. Separate browser
+  profiles and devices do not share stats. Browsers without Web Locks and synchronous
+  teardown saves use a best-effort merge with a small residual write race.
+  Don't change the user's settings through RPC unless they ask.
 - It reacts to `input` events in text fields, textareas, and contenteditable editors;
   password fields are ignored.
 - **Paste ordnance:** pasting text drops theme-skinned weapons near the caret, scaled
@@ -23,4 +30,4 @@ Power Mode is a frontend-only plugin. It has no CLI commands or agent tools.
   rockets, carpet bombing (2k+), orbital strike, meteor shower, tactical nuke (60k+),
   singularity (≥ 200k). Tiers 7–9 run one at a time. Pastes with no text (images,
   files) get the plain paste burst. There is no separate setting: it follows
-  enabled/intensity/lightning/screen shake/sound. Terminal pastes are ignored.
+  enabled/intensity/lightning/screen shake/sound/vibration. Vibration (on by default) buzzes supporting phones (Android Chromium browsers; not iOS Safari or Firefox) only on big moments: milestones, records, combo lost, nukes, singularities, badge unlocks and agent finales. A "Reduce motion" setting (default: follow the OS `prefers-reduced-motion`, overridable) turns off shake, full-screen flashes and lightning. Terminal pastes are ignored.

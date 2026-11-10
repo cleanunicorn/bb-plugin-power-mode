@@ -150,4 +150,44 @@ assert(probe.written === 51, 'g: second flushPowerStats resolved before the writ
 await A.evaluate(k => localStorage.removeItem(k), KEY);
 await until('f: storage clear reached B', () => get(B), s => s.chars === 0);
 
+// (h) collection progress and preferences merge without losing a window's reducer state.
+await both();
+const input = (p, n, theme) => p.evaluate(([n, theme]) => PowerTest.recordAchievementEvent({
+  type: 'edit', now: n, wall: Date.now(), inserted: n, removed: 0, from: 0,
+  length: n, provenance: 'direct', theme, editor: 'one', thread: null, quiet: false, silent: false,
+}), [n, theme]);
+await input(A, 10, 'neon'); await input(B, 20, 'fire');
+await A.evaluate(() => PowerTest.setCollectionPreference({pin: 'first-spark'}));
+await Promise.all([flush(A), flush(B)]);
+await until('h: collection merged', () => B.evaluate(() => PowerTest.getCollection().saved),
+  s => s.biomes.neon === 10 && s.biomes.fire === 20 && s.pin === 'first-spark');
+await input(B, 30, 'fire'); await flush(B); await flush(A);
+assert((await stored(A)).collection.biomes.fire === 50, 'h: reducer continues from merged baseline');
+await A.evaluate(() => PowerTest.resetPowerStats()); await flush(A);
+await until('h: remote collection reset', () => B.evaluate(() => PowerTest.getCollection().saved),
+  s => Object.keys(s.biomes).length === 0 && s.pin === null);
+
+// (i) stale flush after a reset when storage events are suppressed in B.
+await both();
+await record(A, 100); await flush(A);
+await until('i: baseline', () => get(B), s => s.chars === 100);
+await B.evaluate(() => window.addEventListener('storage', e => e.stopImmediatePropagation(), {capture: true}));
+await record(B, 7);
+await A.evaluate(() => PowerTest.resetPowerStats()); await flush(A);
+await flush(B);
+assert((await stored(A)).chars === 0 && (await get(B)).chars === 0, 'i: stale flush dropped old activity');
+
+// (j) repeated overlapping flushes and the no-Web-Locks fallback.
+for (const noLocks of [false, true]) {
+  await both();
+  if (noLocks) for (const p of [A, B])
+    await p.evaluate(() => Object.defineProperty(navigator, 'locks', {value: undefined, configurable: true}));
+  for (let i = 0; i < 10; i++) {
+    await Promise.all([A.evaluate(() => PowerTest.recordStats(s => ({...s, deletes: s.deletes + 2}))),
+      B.evaluate(() => PowerTest.recordStats(s => ({...s, deletes: s.deletes + 3})))]);
+    await Promise.all([flush(A), flush(B)]);
+  }
+  assert((await stored(A)).deletes === 50, 'j: repeated flushes count exactly once, noLocks=' + noLocks);
+}
+
 return 'ok';

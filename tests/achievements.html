@@ -1,0 +1,9 @@
+<!doctype html><meta charset="utf-8"><title>Power Mode achievement integration</title>
+<link rel="stylesheet" href="app.css"><style>body{font:15px system-ui;background:#181824;color:#eee;padding:24px}textarea{width:400px;height:90px}#panes{display:flex;gap:20px}#gallery{margin-top:25px}li{padding:8px;margin:5px;border:1px solid #555}button,select{margin:4px;padding:6px}input,textarea{color:#222}section{background:#30304a;padding:12px}</style>
+<h1>Power Mode achievement integration</h1>
+<div id="panes">
+<div data-app-composer data-layout="compact"><span hidden id="marker-a"></span><div data-composer-box><textarea aria-label="Queued editor" id="queued"></textarea></div><div data-follow-up-composer-anchor><div data-composer-box><textarea aria-label="Composer A" id="a"></textarea></div></div></div>
+<div data-app-composer><span hidden id="marker-b"></span><div data-follow-up-composer-anchor><div data-composer-box><div contenteditable="true" role="textbox" aria-label="Composer B" id="b" style="border:1px solid white;width:300px;min-height:90px"></div></div></div></div>
+</div>
+<label>Settings input <input id="settings" type="text"></label><div class="xterm"><textarea aria-label="Terminal" id="terminal"></textarea></div>
+<div id="gallery"></div><script src="achievements.js"></script>
