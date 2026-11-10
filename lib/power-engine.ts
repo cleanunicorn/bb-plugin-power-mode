@@ -479,6 +479,54 @@ const CSS = `
   transition:opacity .4s ease;background:radial-gradient(ellipse at center,transparent 55%,var(--pm-glow) 140%)}
 `;
 
+// ---------------------------------------------------------------- haptics
+
+/** Vibration patterns (ms on/off/on…) for the big moments. Scale is deliberate: bigger event, longer buzz. */
+export const HAPTICS = {
+  powerOn: [40],
+  comboLost: [30, 40, 30, 40, 90],
+  record: [90, 60, 90, 60, 220],
+  nuke: [320, 90, 120, 90, 120],
+  singularity: [450, 120, 200],
+  agentMilestone: [50, 40, 80],
+  turnComplete: [60, 60, 120],
+  collection: [200, 100, 200, 100, 450],
+} as const;
+
+/** Milestone buzz grows with the milestone's rank (0 = the first). */
+export function milestoneHaptic(rank: number): number[] {
+  const r = Math.max(0, Math.min(rank, 7));
+  return r < 2 ? [50 + 15 * r] : [60 + 15 * r, 50, 100 + 30 * r];
+}
+
+export const UNLOCK_HAPTICS: Record<Rarity, readonly number[]> = {
+  common: [40],
+  rare: [60, 50, 60],
+  epic: [80, 50, 80, 50, 160],
+  secret: [80, 50, 80, 50, 160],
+  legendary: [120, 60, 120, 60, 300],
+};
+
+type VibrateFn = (pattern: number[]) => boolean;
+let vibrateFn: VibrateFn | null = null;
+/** Test seam: capture vibration patterns instead of calling navigator.vibrate (null restores it). */
+export function setVibrate(fn: VibrateFn | null) {
+  vibrateFn = fn;
+}
+function vibrate(pattern: number[]): void {
+  if (vibrateFn) {
+    vibrateFn(pattern);
+    return;
+  }
+  // Missing on desktop and iOS Safari; Chrome also refuses before the first user gesture.
+  if (typeof navigator === "undefined" || typeof navigator.vibrate !== "function") return;
+  try {
+    navigator.vibrate(pattern);
+  } catch {
+    // Some embedders throw instead of returning false; haptics are best-effort.
+  }
+}
+
 // ---------------------------------------------------------------- sound
 
 class Synth {
@@ -1181,6 +1229,32 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
     particles.push({ kind: "bolt", x, y, vx: 0, vy: 0, life: 260, maxLife: 260, size: rand(1.5, 2.5), hue, spin: 0, angle: 0, points });
   }
 
+  // ---- haptics
+
+  let buzzUntil = 0;
+  let buzzWeight = 0;
+  /**
+   * Vibrate for a big moment. While a pattern is still playing, a weaker one is
+   * dropped and a stronger one replaces it, so stacked events (a milestone
+   * landing with a badge) never queue up a long rattle.
+   */
+  function buzz(pattern: readonly number[]) {
+    if (!settings.enabled || !settings.haptics || document.hidden) return;
+    const weight = pattern.reduce((n, ms) => n + ms, 0);
+    const now = performance.now();
+    if (now < buzzUntil && weight <= buzzWeight) return;
+    buzzUntil = now + weight;
+    buzzWeight = weight;
+    vibrate([...pattern]);
+  }
+
+  /** Cut a pattern that is still playing (power off, haptics off, dispose). */
+  function stopBuzz() {
+    if (performance.now() < buzzUntil) vibrate([0]);
+    buzzUntil = 0;
+    buzzWeight = 0;
+  }
+
   // ---- shake (editor translation, viewport-safe page offsets)
 
   function shakeElement(el: HTMLElement, amp: number) {
@@ -1789,6 +1863,7 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
         { src: d.src, dir: -Math.PI / 2, spread: 0.18 });
       if (settings.lightning) for (let k = 0; k < 3; k++) bolt(p.x + rand(-60, 60), p.y, d.hue);
       screenShake(12 * d.shake);
+      buzz(HAPTICS.nuke);
       if (settings.sound) synth.nuke(d.skin.sound);
       weaponSlam(d);
     }, fall);
@@ -1833,6 +1908,7 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
       else flash(d.hue, p.x, p.y, true);
       if (settings.lightning) for (let k = 0; k < 6; k++) bolt(clampTo(p.x + rand(-300, 300), W), clampTo(p.y + rand(-120, 120), H), d.hue);
       screenShake(12 * d.shake);
+      buzz(HAPTICS.singularity);
       if (settings.sound) {
         synth.blast(d.skin.sound, 1);
         if (d.skin.sound === "soft") synth.chime();
@@ -1980,6 +2056,7 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
       fireworks(earned >= 250 ? 5 : earned >= 100 ? 4 : 3, 45, 1.1, 12);
       if (settings.ghostLetters) for (let i = 0; i < 4; i++) glyph(window.innerWidth / 2 + rand(-140, 140), window.innerHeight * 0.42, 45, "👑", 1.3);
       updatePowerSettings({ bestCombo: earned });
+      buzz(HAPTICS.record);
       if (settings.sound) synth.fanfare();
     } else if (earned >= 25) {
       // The streak broke: the counter shatters off the HUD.
@@ -1989,6 +2066,7 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
       burst(x, y, 355, 26, 7, theme.shape === "pixel" ? "pixel" : "shard");
       smoke(x, y, 3, 0.8);
       slam("COMBO LOST", `×${earned}`, 355, "lost");
+      buzz(HAPTICS.comboLost);
       if (settings.sound) synth.lost();
     }
     hud.classList.remove("pm-hot", "pm-danger", "pm-record");
@@ -2014,6 +2092,7 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
     fireworks(Math.min(rank, 6), hue, 0.9 + rank * 0.05);
     if (rank >= 3) fx(() => ring(x, y, (hue + 30) % 360, Math.max(window.innerWidth, window.innerHeight) * 0.55, 900), 140);
     screenShake(10 * INTENSITY[settings.intensity].shake);
+    buzz(milestoneHaptic(rank));
     if (settings.lightning) {
       const bolts = m.at >= 100 ? 4 : m.at >= 50 ? 3 : 1;
       for (let i = 0; i < bolts; i++) later(() => bolt(x, y, hue), i * 70);
@@ -2074,10 +2153,12 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
       fx(() => {
         slam("COLLECTION COMPLETE", `${ACHIEVEMENTS.length} OF ${ACHIEVEMENTS.length} BADGES`, 45);
         fireworks(6, 45, 1.3, 60);
+        buzz(HAPTICS.collection);
         if (settings.sound) synth.fanfare();
       }, 900);
     }
     screenShake(rarity === "legendary" ? 8 : rarity === "common" ? 4 : 6);
+    if (!replay) buzz(UNLOCK_HAPTICS[rarity]);
     if (settings.sound) {
       synth.chime();
       if (rarity === "legendary" || rarity === "epic") synth.fanfare();
@@ -2423,6 +2504,7 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
       explode(window.innerWidth / 2, window.innerHeight * 0.3, hue, 0.5);
       fireworks(next.at >= 600 ? 3 : next.at >= 150 ? 2 : 1, hue, 0.9);
       if (settings.lightning && next.at >= 300) bolt(window.innerWidth / 2, window.innerHeight * 0.3, hue);
+      buzz(HAPTICS.agentMilestone);
       if (settings.sound) synth.fanfare();
     }
     if (combo === 0) {
@@ -2485,6 +2567,7 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
       explode(window.innerWidth / 2, window.innerHeight * 0.3, hue, 0.8);
       // The finale scales with the reply: two shells, up to five for a 600-word turn.
       fireworks(Math.min(5, 2 + Math.floor(turn.words / 200)), hue, 1, 50);
+      buzz(HAPTICS.turnComplete);
       if (settings.sound) synth.fanfare();
       start();
     }
@@ -3397,6 +3480,7 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
     const was = settings.enabled;
     if (!next.particles) { particles=[]; glyphCount=0; }
     const themeChanged = next.theme !== settings.theme;
+    if (!next.enabled || !next.haptics) stopBuzz();
     settings = next;
     theme = THEMES[next.theme];
     themeBucket = -1;
@@ -3431,6 +3515,7 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
       if (next.lightning) for (let i = 0; i < 4; i++) later(() => bolt(cx + rand(-200, 200), cy, hue), i * 90);
       slam("POWER MODE", `${theme.name.toUpperCase()} · ${next.intensity.toUpperCase()}`, hue);
       screenShake(12);
+      buzz(HAPTICS.powerOn);
       if (next.sound) synth.powerUp();
       start();
     } else if (was && !next.enabled) {
@@ -3496,6 +3581,7 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
     document.documentElement.style.removeProperty("--pm-font");
     style.remove();
     synth.dispose();
+    stopBuzz();
     particles = [];
   }
   signal.addEventListener("abort", dispose, { once: true });

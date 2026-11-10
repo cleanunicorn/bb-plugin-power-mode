@@ -58,6 +58,11 @@ particle caps under ten rapid 300k pastes, the singularity pull, `lightning`,
 `screenShake` and `sound` off, and disabling and re-enabling during an event. It
 uses the `setOrdnanceRandom` and `ordnanceDebug` test seams.
 
+`haptics.browser.js` covers mobile vibration: crossing a combo milestone and
+losing a 25+ streak each vibrate with their pattern, ordinary keystrokes do not,
+and `haptics: false` silences them. It captures patterns through the `setVibrate`
+test seam instead of calling `navigator.vibrate`.
+
 `thread-switch.browser.js` covers lingering effects after thread navigation (#17):
 twelve timeline swaps with streaming text while the agent starts and stops leave
 no canvas, bloom, vignette or HUD residue once activity ends; a render frame that

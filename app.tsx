@@ -189,6 +189,11 @@ const EFFECT_OPTIONS: {
     label: "Sound",
     hint: "Synth blips that climb with the combo, booms on milestones.",
   },
+  {
+    key: "haptics",
+    label: "Vibration",
+    hint: "Phones buzz on milestones, records, nukes and badge unlocks (where the browser supports it).",
+  },
 ];
 
 function Row({ children }: { children: ReactNode }) {
