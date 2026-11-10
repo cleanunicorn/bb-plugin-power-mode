@@ -167,9 +167,9 @@ describe("power-stats", () => {
     expect(Object.keys(stats.getPowerStats().unlocked).length).toBeGreaterThan(0);
     stats.resetPowerStats();
     expect(stats.getPowerStats()).toEqual(stats.EMPTY_STATS);
-    expect(JSON.parse(win.data.get(STATS_KEY)!)).toEqual(stats.EMPTY_STATS);
+    expect(JSON.parse(win.data.get(STATS_KEY)!)).toEqual({ ...stats.EMPTY_STATS, epoch: expect.any(String) });
     vi.advanceTimersByTime(5000); // a pending debounced save must not resurrect old stats
-    expect(JSON.parse(win.data.get(STATS_KEY)!)).toEqual(stats.EMPTY_STATS);
+    expect(JSON.parse(win.data.get(STATS_KEY)!)).toEqual({ ...stats.EMPTY_STATS, epoch: expect.any(String) });
   });
 
   it("keeps stats in memory when storage writes fail", async () => {
@@ -178,4 +178,102 @@ describe("power-stats", () => {
     expect(() => stats.recordStats((s) => ({ ...s, chars: 7 }))).not.toThrow();
     expect(stats.getPowerStats().chars).toBe(7);
   });
+  it("merges collection deltas and new ordnance fields without mutating the baseline", async () => {
+    const { mergeStats, EMPTY_STATS } = await freshStats();
+    const base = structuredClone(EMPTY_STATS);
+    base.collection.replies = 2;
+    const local = structuredClone(base), remote = structuredClone(base);
+    local.luckyDrops = 2; local.clutches = 3; local.bestPasteTier = 5; local.bestPasteChain = 3;
+    remote.luckyDrops = 1; remote.clutches = 2; remote.bestPasteTier = 8;
+    local.collection.replies += 3; remote.collection.replies += 4;
+    local.collection.biomes.neon = 60; remote.collection.biomes.neon = 50;
+    local.collection.threads.one = 2; remote.collection.threads.two = 3;
+    local.collection.lanterns = ["neon"]; remote.collection.lanterns = ["fire"];
+    remote.collection.pin = "first-spark";
+    local.unlocked["hello-copilot"] = 200; remote.unlocked["hello-copilot"] = 100;
+    const merged = mergeStats(remote, local, base);
+    expect(merged).toMatchObject({ luckyDrops: 3, clutches: 5, bestPasteTier: 8, bestPasteChain: 3 });
+    expect(merged.collection).toMatchObject({ replies: 9, biomes: { neon: 100 }, threads: { one: 2, two: 3 },
+      lanterns: ["neon", "fire"], pin: "first-spark", unlocked: { "hello-copilot": 100 } });
+    expect(base.collection.replies).toBe(2);
+    expect(mergeStats(merged, merged, merged)).toEqual(merged);
+  });
+
+  it("preserves reducer activity after repeated flushes and remote adoption", async () => {
+    const stats = await freshStats();
+    const event = (n: number) => stats.recordAchievementEvent({ type: "edit", now: n, wall: Date.now(),
+      inserted: 10, provenance: "direct", theme: "neon", editor: "one", thread: null, quiet: false, silent: false });
+    event(1);
+    await stats.flushPowerStats();
+    event(2);
+    await stats.flushPowerStats();
+    expect(JSON.parse(win.data.get(STATS_KEY)!).collection.biomes.neon).toBe(20);
+    const remote = JSON.parse(win.data.get(STATS_KEY)!);
+    remote.collection.biomes.fire = 15;
+    remote.collection.pin = "first-spark";
+    win.data.set(STATS_KEY, JSON.stringify(remote));
+    win.dispatchStorage(STATS_KEY, JSON.stringify(remote));
+    expect(stats.getCollection().saved.pin).toBe("first-spark");
+    event(3);
+    await stats.flushPowerStats();
+    expect(JSON.parse(win.data.get(STATS_KEY)!).collection.biomes).toEqual({ neon: 30, fire: 15 });
+  });
+
+  it("does not resurrect a cleared legacy document, even without a storage event", async () => {
+    win.data.set(STATS_KEY, JSON.stringify({ chars: 50, unlocked: { "first-spark": 1 } }));
+    const stats = await freshStats();
+    stats.recordStats(s => ({ ...s, chars: s.chars + 5 }));
+    win.data.delete(STATS_KEY);
+    await stats.flushPowerStats();
+    expect(stats.getPowerStats().chars).toBe(0);
+    expect(JSON.parse(win.data.get(STATS_KEY)!).chars).toBe(0);
+  });
+
+  it("continues flushing when a lock is granted synchronously", async () => {
+    vi.stubGlobal("navigator", { locks: { request: (_: string, run: () => void) => { run(); return Promise.resolve(); } } });
+    const stats = await freshStats();
+    stats.recordStats(s => ({ ...s, pastes: 1 }));
+    await stats.flushPowerStats();
+    stats.resetPowerStats();
+    await stats.flushPowerStats();
+    expect(JSON.parse(win.data.get(STATS_KEY)!).pastes).toBe(0);
+  });
+
+  it("retries a failed write without losing or double-counting activity", async () => {
+    vi.stubGlobal("navigator", {});
+    const stats = await freshStats();
+    stats.recordStats(s => ({ ...s, pastes: 2 }));
+    const setItem = window.localStorage.setItem;
+    window.localStorage.setItem = () => { throw new Error("temporary quota failure"); };
+    await stats.flushPowerStats();
+    expect(stats.getPowerStats().pastes).toBe(2);
+    window.localStorage.setItem = setItem;
+    await stats.flushPowerStats();
+    expect(JSON.parse(win.data.get(STATS_KEY)!).pastes).toBe(2);
+    stats.recordStats(s => ({ ...s, pastes: s.pastes + 1 }));
+    await stats.flushPowerStats();
+    expect(JSON.parse(win.data.get(STATS_KEY)!).pastes).toBe(3);
+  });
+
+  it("only announces a claimed unlock after a successful write and retries reset", async () => {
+    vi.stubGlobal("navigator", {});
+    const stats = await freshStats();
+    const handler = vi.fn();
+    stats.setUnlockHandler(handler);
+    const setItem = window.localStorage.setItem;
+    window.localStorage.setItem = () => { throw new Error("temporary quota failure"); };
+    stats.recordStats(s => ({ ...s, chars: 1 }));
+    expect(handler).not.toHaveBeenCalled();
+    window.localStorage.setItem = setItem;
+    await stats.flushPowerStats();
+    expect(handler.mock.calls.map(([a]) => a.id)).toEqual(["first-spark"]);
+    await stats.flushPowerStats();
+    expect(handler).toHaveBeenCalledTimes(1);
+    window.localStorage.setItem = () => { throw new Error("temporary quota failure"); };
+    stats.resetPowerStats();
+    window.localStorage.setItem = setItem;
+    await stats.flushPowerStats();
+    expect(JSON.parse(win.data.get(STATS_KEY)!).chars).toBe(0);
+  });
+
 });

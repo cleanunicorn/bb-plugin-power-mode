@@ -25,7 +25,7 @@ import {
   type PowerSettings,
 } from "./power-store";
 import { availableTitles, hudChallenge, rarityOf, type Rarity } from "./achievement-presentation";
-import { ACHIEVEMENTS, onCollectionReset, getPowerStats, subscribePowerStats, flushPowerStats, recordStats, setUnlockHandler, type Achievement } from "./power-stats";
+import { ACHIEVEMENTS, onCollectionReset, getPowerStats, subscribePowerStats, flushPowerStatsSync, recordStats, setUnlockHandler, type Achievement } from "./power-stats";
 import { ORDNANCE_SKINS, THEMES, type OrdnanceSkin, type OrdnanceSound, type Theme } from "./power-themes";
 
 // ---------------------------------------------------------------- tuning
@@ -3604,7 +3604,7 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
     unresetUnlock();
     window.clearTimeout(unlockTimer);
     unlockBatch.length=0;
-    flushPowerStats();
+    flushPowerStatsSync();
     if (raf) cancelAnimationFrame(raf);
     if (agentFlushTimer) window.clearTimeout(agentFlushTimer);
     for (const id of timers) window.clearTimeout(id);

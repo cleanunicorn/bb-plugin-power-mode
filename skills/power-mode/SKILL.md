@@ -17,9 +17,11 @@ Power Mode is a frontend-only plugin. It has no CLI commands or agent tools.
 - Settings are saved on the bb server (plugin KV, key `settings`) and follow the user
   to every browser and device on that server; each browser keeps a localStorage copy
   for instant start. Read them with `bb plugin rpc call <plugin id> settings.get`.
-  Stats and achievements stay in the browser's localStorage only and are not yet
-  synchronized between open windows, so one window can overwrite another's progress
-  (issue #10).
+  Stats and achievements stay in the browser's localStorage and synchronize between
+  open windows on the same origin and browser profile. Counters and collection progress
+  merge, unlock notifications are deduplicated, and resets propagate. Separate browser
+  profiles and devices do not share stats. Browsers without Web Locks and synchronous
+  teardown saves use a best-effort merge with a small residual write race.
   Don't change the user's settings through RPC unless they ask.
 - It reacts to `input` events in text fields, textareas, and contenteditable editors;
   password fields are ignored.

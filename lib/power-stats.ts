@@ -1,9 +1,18 @@
 // Lifetime stats and achievements. The engine records events in memory on
 // every keystroke; they are persisted at most every 2 seconds so typing never
 // pays for a localStorage write. Unlocks notify through `onUnlock`.
+//
+// Several windows of one browser profile share the same localStorage document,
+// so a window never overwrites it with its own copy. Each window keeps `synced`
+// (the document as last seen in storage) and `stats` (synced + local activity
+// not yet written). A flush runs under a Web Lock, re-reads storage and merges
+// the local delta (`stats - synced`) into whatever is there. A reset writes a
+// new random `epoch`; a window that sees a different epoch drops its pending
+// delta and adopts storage, so a stale window cannot bring back old stats.
 
 import {
   CATALOG,
+  RULES,
   createCollection,
   reduceCollection,
   parseCollection,
@@ -280,6 +289,55 @@ const LEGACY: (Omit<Achievement, "category" | "hidden" | "requires"> & {
   },
 ];
 
+export const COUNTER_KEYS = ["chars", "deletes", "pastes", "milestones", "agentChars", "agentTurns", "luckyDrops", "clutches"] as const;
+export const BEST_KEYS = ["bestCombo", "bestWpm", "bestAgentWords", "bestPasteTier", "bestPasteChain"] as const;
+
+/**
+ * Merge this window's activity into the stored document. Counters add the local
+ * delta (`local - synced`) to the stored value, bests take the max, themes union,
+ * and unlocks union keeping the earliest timestamp. Pure.
+ */
+export function mergeStats(stored: PowerStats, local: PowerStats, synced: PowerStats): PowerStats {
+  const out: PowerStats = { ...stored };
+  for (const k of COUNTER_KEYS) out[k] = stored[k] + Math.max(0, local[k] - synced[k]);
+  for (const k of BEST_KEYS) out[k] = Math.max(stored[k], local[k]);
+  out.themesTried = THEME_IDS.filter((t) => stored.themesTried.includes(t) || local.themesTried.includes(t));
+  const unlocked: Record<string, number> = { ...stored.unlocked };
+  for (const [id, at] of Object.entries(local.unlocked)) {
+    unlocked[id] = id in unlocked ? Math.min(unlocked[id], at) : at;
+  }
+  out.unlocked = unlocked;
+  const a = stored.collection, b = local.collection, c = synced.collection;
+  const saved = { ...a, unlocked: { ...a.unlocked } };
+  for (const k of ["windows", "revisions", "replies", "landings"] as const)
+    saved[k] = a[k] + Math.max(0, b[k] - c[k]);
+  saved.best = Math.max(a.best, b.best);
+  for (const k of ["biomes", "threads"] as const) {
+    saved[k] = { ...a[k] };
+    for (const [id, count] of Object.entries(b[k]))
+      saved[k][id] = Math.min(k === "biomes" ? RULES.biome : RULES.longThread,
+        (a[k][id] ?? 0) + Math.max(0, count - (c[k][id] ?? 0)));
+  }
+  for (const k of ["lanterns", "jackets"] as const)
+    saved[k] = THEME_IDS.filter(t => a[k].includes(t) || b[k].includes(t));
+  for (const k of ["pin", "title"] as const)
+    saved[k] = b[k] !== c[k] ? b[k] : a[k];
+  for (const id of Object.keys(unlocked))
+    if (CATALOG.some(a => a.id === id)) saved.unlocked[id] = unlocked[id];
+  out.collection = saved;
+  return out;
+}
+
+interface StatsDoc {
+  stats: PowerStats;
+  /** Reset generation. Legacy documents have none and parse as "". */
+  epoch: string;
+  present: boolean;
+}
+
+const LOCK_NAME = "stats-lock";
+const newEpoch = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
+
 export const ACHIEVEMENTS: Achievement[] = [
   ...LEGACY.map((a) => ({
     ...a,
@@ -325,7 +383,7 @@ export function recordAchievementEvent(event: Omit<AchievementEvent, "seq">) {
   };
   scheduleSave();
   for (const id of earned)
-    unlockHandler?.(ACHIEVEMENTS.find((a) => a.id === id)!);
+    pendingToasts.push(ACHIEVEMENTS.find((a) => a.id === id)!);
   if (earned.length) flushPowerStats();
 }
 export function setCollectionPreference(patch: {
@@ -344,9 +402,19 @@ export function setCollectionPreference(patch: {
   flushPowerStats();
 }
 let stats: PowerStats = EMPTY_STATS;
+let synced: PowerStats = EMPTY_STATS;
+let epoch = "";
 let loaded = false;
+let storedPresent = false;
+/** A storage deletion already adopted locally, awaiting a fresh persisted epoch. */
+let pendingClear = false;
 let dirty = false;
 let saveTimer = 0;
+let flushQueued: Promise<void> | null = null;
+/** A local reset whose write has not reached storage yet. */
+let pendingReset = false;
+/** Local unlocks waiting for the locked flush to confirm no other window claimed them first. */
+let pendingToasts: Achievement[] = [];
 const listeners = new Set<() => void>();
 let unlockHandler: ((a: Achievement) => void) | null = null;
 
@@ -354,11 +422,11 @@ function key() {
   return powerStorageKey("stats");
 }
 
-function parse(raw: string | null): PowerStats {
-  if (!raw) return EMPTY_STATS;
+function parseDoc(raw: string | null): StatsDoc {
+  if (!raw) return { stats: EMPTY_STATS, epoch: "", present: false };
   try {
     const v = JSON.parse(raw) as Record<string, unknown>;
-    if (!v || typeof v !== "object") return EMPTY_STATS;
+    if (!v || typeof v !== "object") return { stats: EMPTY_STATS, epoch: "", present: false };
     const n = (k: keyof PowerStats) =>
       typeof v[k] === "number" && Number.isFinite(v[k])
         ? Math.max(0, Math.floor(v[k] as number))
@@ -385,37 +453,62 @@ function parse(raw: string | null): PowerStats {
     )
       parsedCollection.pin = storedPin;
     return {
-      collection: parsedCollection,
-      chars: n("chars"),
-      deletes: n("deletes"),
-      pastes: n("pastes"),
-      milestones: n("milestones"),
-      bestCombo: n("bestCombo"),
-      bestWpm: n("bestWpm"),
-      agentChars: n("agentChars"),
-      bestAgentWords: n("bestAgentWords"),
-      agentTurns: n("agentTurns"),
-      bestPasteTier: Math.min(9, n("bestPasteTier")),
-      luckyDrops: n("luckyDrops"),
-      bestPasteChain: n("bestPasteChain"),
-      clutches: n("clutches"),
-      themesTried: Array.isArray(v.themesTried)
-        ? THEME_IDS.filter((t) => (v.themesTried as unknown[]).includes(t))
-        : [],
-      unlocked,
+      present: true,
+      epoch: typeof v.epoch === "string" ? v.epoch : "",
+      stats: {
+        collection: parsedCollection,
+        chars: n("chars"),
+        deletes: n("deletes"),
+        pastes: n("pastes"),
+        milestones: n("milestones"),
+        bestCombo: n("bestCombo"),
+        bestWpm: n("bestWpm"),
+        agentChars: n("agentChars"),
+        bestAgentWords: n("bestAgentWords"),
+        agentTurns: n("agentTurns"),
+        bestPasteTier: Math.min(9, n("bestPasteTier")),
+        luckyDrops: n("luckyDrops"),
+        bestPasteChain: n("bestPasteChain"),
+        clutches: n("clutches"),
+        themesTried: Array.isArray(v.themesTried)
+          ? THEME_IDS.filter((t) => (v.themesTried as unknown[]).includes(t))
+          : [],
+        unlocked,
+      },
     };
   } catch {
-    return EMPTY_STATS;
+    return { stats: EMPTY_STATS, epoch: "", present: false };
   }
+}
+
+function readDoc(): StatsDoc {
+  try {
+    return parseDoc(window.localStorage.getItem(key()));
+  } catch {
+    // A blocked read is not evidence of a reset. Keep the last known baseline.
+    return { stats: synced, epoch, present: storedPresent };
+  }
+}
+
+const same = (a: PowerStats, b: PowerStats) => a === b || JSON.stringify(a) === JSON.stringify(b);
+
+function notify() {
+  for (const l of listeners) l();
 }
 
 function ensureLoaded() {
   if (loaded) return;
   loaded = true;
+  const doc = readDoc(); // never written back here: only a later flush writes
+  stats = doc.stats;
+  synced = structuredClone(doc.stats);
+  epoch = doc.epoch;
+  storedPresent = doc.present;
   try {
-    stats = parse(window.localStorage.getItem(key()));
+    window.addEventListener("storage", onStorage);
+    window.addEventListener("pagehide", flushPowerStatsSync);
   } catch {
-    stats = EMPTY_STATS;
+    // no window: best-effort
   }
   const storedPin = stats.collection.pin;
   collection = createCollection(stats.collection);
@@ -430,37 +523,158 @@ function ensureLoaded() {
   };
 }
 
-function flush() {
-  if (saveTimer) window.clearTimeout(saveTimer);
-  saveTimer = 0;
-  if (!dirty) return;
-  dirty = false;
-  try {
-    window.localStorage.setItem(key(), JSON.stringify(stats));
-  } catch {
-    // ignore: stats are best-effort
+/**
+ * Unlock achievements the current stats satisfy. Ids already in `storedUnlocked`
+ * adopt that timestamp silently; only ids nobody has claimed notify.
+ */
+function claimUnlocks(storedUnlocked: Record<string, number>, defer = false, event: StatsEvent = {}): boolean {
+  const ctx = { hour: new Date().getHours(), typed: event.typed === true };
+  let changed = false;
+  for (const a of ACHIEVEMENTS) {
+    if (stats.unlocked[a.id] || !a.check(stats, ctx)) continue;
+    const prior = storedUnlocked[a.id];
+    stats = { ...stats, unlocked: { ...stats.unlocked, [a.id]: prior ?? Date.now() } };
+    changed = true;
+    if (prior === undefined) {
+      collection.session.discoveries.push(a.id);
+      if (defer) pendingToasts.push(a);
+      else unlockHandler?.(a);
+    }
   }
-  for (const l of listeners) l();
+  return changed;
+}
+
+/**
+ * Read-merge-write against storage. Fully synchronous, so local `recordStats`
+ * calls cannot land between the merge and the rebase.
+ */
+function flushNow() {
+  saveTimer = 0;
+  ensureLoaded();
+  const stored = readDoc();
+  let base = stored.stats;
+  let out: PowerStats;
+  if (pendingReset) {
+    // Our reset wins over whatever is stored; keep only activity since it.
+    base = EMPTY_STATS;
+    out = mergeStats(EMPTY_STATS, stats, synced);
+  } else if (!stored.present && (storedPresent || pendingClear)) {
+    // Deletion also resets legacy documents whose epoch was the empty string.
+    epoch = newEpoch();
+    base = EMPTY_STATS;
+    out = pendingClear ? stats : structuredClone(EMPTY_STATS);
+    if (!pendingClear) {
+      collection = createCollection();
+      pendingToasts = [];
+      for (const fn of resetListeners) fn();
+    }
+  } else if (stored.epoch !== epoch || pendingClear) {
+    // Another window reset: drop our stale delta and adopt storage.
+    epoch = stored.epoch;
+    out = structuredClone(stored.stats);
+    collection = createCollection();
+    pendingToasts = [];
+    for (const fn of resetListeners) fn();
+  } else {
+    out = mergeStats(stored.stats, stats, synced);
+  }
+  const before = stats;
+  const wasDirty = dirty;
+  stats = same(out, stats) ? stats : out;
+  collection.saved = stats.collection;
+  claimUnlocks(base.unlocked, true);
+  // Toast earlier local unlocks only if no other window had stored them first.
+  const toasts = pendingToasts.filter((a) => a.id in stats.unlocked && !(a.id in base.unlocked));
+  const doc = JSON.stringify({ ...stats, epoch });
+  try {
+    if (pendingReset || doc !== window.localStorage.getItem(key())) {
+      window.localStorage.setItem(key(), doc);
+    }
+  } catch {
+    // Keep the delta relative to storage, so a later successful flush retries it.
+    synced = structuredClone(base);
+    dirty = true;
+    if (!stored.present && !pendingReset) pendingClear = true;
+    if (wasDirty || stats !== before) notify();
+    return;
+  }
+  pendingToasts = [];
+  pendingReset = false;
+  pendingClear = false;
+  storedPresent = true;
+  dirty = false;
+  synced = structuredClone(stats);
+  for (const a of toasts) unlockHandler?.(a);
+  if (wasDirty || stats !== before) notify();
+}
+
+/** Flush under a cross-window lock when possible, else synchronously. */
+function requestFlush(): Promise<void> {
+  const locks = typeof navigator !== "undefined" ? navigator.locks : undefined;
+  if (!locks) {
+    flushNow();
+    return Promise.resolve();
+  }
+  if (flushQueued) return flushQueued; // resolves once the pending flush has written
+  let ran = false;
+  const run = () => {
+    ran = true;
+    flushQueued = null;
+    flushNow();
+  };
+  const queued = locks.request(powerStorageKey(LOCK_NAME), run).catch(() => {
+    if (!ran) run();
+  });
+  // Some lock implementations grant an available lock synchronously.
+  if (!ran) flushQueued = queued;
+  return queued;
 }
 
 function scheduleSave() {
   dirty = true;
-  if (!saveTimer) saveTimer = window.setTimeout(flush, 2000);
+  if (!saveTimer) saveTimer = window.setTimeout(() => {
+    saveTimer = 0;
+    void requestFlush();
+  }, 2000);
 }
 
-function checkAchievements(event: StatsEvent) {
-  const ctx: AchievementContext = { hour: new Date().getHours(), typed: event.typed === true };
-  let unlockedAny = false;
-  for (const a of ACHIEVEMENTS) {
-    if (stats.unlocked[a.id] || !a.check(stats, ctx)) continue;
-    stats = { ...stats, unlocked: { ...stats.unlocked, [a.id]: Date.now() } };
-    unlockedAny = true;
-    collection.session.discoveries.push(a.id);
-    unlockHandler?.(a);
+/** Another window changed the shared document. */
+function onStorage(e: StorageEvent) {
+  if (e.key !== null && e.key !== key()) return;
+  if (e.storageArea && e.storageArea !== window.localStorage) return;
+  if (pendingReset) return; // our reset overwrites it at the next flush
+  // Events can arrive late and out of order, so read the current document
+  // rather than trusting `newValue`. A cleared storage reads as an empty one.
+  const doc = readDoc();
+  if (doc.epoch !== epoch || !doc.present) {
+    epoch = doc.epoch;
+    stats = structuredClone(doc.stats);
+    synced = structuredClone(doc.stats);
+    collection = createCollection();
+    pendingToasts = [];
+    for (const fn of resetListeners) fn();
+    dirty = false;
+  } else {
+    stats = mergeStats(doc.stats, stats, synced);
+    synced = doc.stats;
   }
-  if (unlockedAny) {
-    dirty = true;
-    flush(); // unlocks persist and show in settings immediately
+  storedPresent = doc.present;
+  pendingClear = !doc.present;
+  collection.saved = stats.collection;
+  notify();
+  checkAchievements();
+  if (pendingClear) void requestFlush();
+}
+
+function checkAchievements(event: StatsEvent = {}) {
+  // Cheap in-memory pre-check: typing must not touch storage unless something unlocks.
+  const ctx = { hour: new Date().getHours(), typed: event.typed === true };
+  if (!ACHIEVEMENTS.some((a) => !stats.unlocked[a.id] && a.check(stats, ctx))) return;
+  const stored = pendingReset ? { stats: EMPTY_STATS, epoch } : readDoc();
+  const prior = stored.epoch === epoch ? stored.stats.unlocked : {};
+  if (claimUnlocks(prior, true, event)) {
+    notify(); // unlocks show in settings immediately
+    void requestFlush();
   }
 }
 
@@ -482,6 +696,7 @@ export function getPowerStats(): PowerStats {
 }
 
 export function subscribePowerStats(listener: () => void) {
+  ensureLoaded();
   listeners.add(listener);
   return () => {
     listeners.delete(listener);
@@ -492,15 +707,37 @@ export function setUnlockHandler(handler: ((a: Achievement) => void) | null) {
   unlockHandler = handler;
 }
 
-export function flushPowerStats() {
+/** Persist pending activity under the cross-window lock; resolves once written. */
+export function flushPowerStats(): Promise<void> {
+  ensureLoaded();
   if (saveTimer) window.clearTimeout(saveTimer);
-  flush();
+  saveTimer = 0;
+  return requestFlush();
 }
 
+/**
+ * Teardown flush (dispose, pagehide): the page may unload before a lock is
+ * granted, so this reads, merges and writes synchronously without the lock.
+ */
+export function flushPowerStatsSync() {
+  if (!loaded) return;
+  if (saveTimer) window.clearTimeout(saveTimer);
+  saveTimer = 0;
+  if (dirty || pendingReset || pendingClear) flushNow();
+}
+
+/** Start a new epoch with empty stats. Local state resets at once; storage follows under the lock. */
 export function resetPowerStats() {
+  ensureLoaded();
+  epoch = newEpoch();
   collection = createCollection();
   stats = { ...EMPTY_STATS, collection: collection.saved, unlocked: {} };
+  synced = structuredClone(stats);
   for (const fn of resetListeners) fn();
+  pendingToasts = [];
+  pendingReset = true;
+  pendingClear = false;
   dirty = true;
-  flushPowerStats();
+  notify();
+  void flushPowerStats();
 }

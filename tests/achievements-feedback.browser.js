@@ -47,6 +47,7 @@ await page.evaluate(() => {
     words: 20,
   });
 });
+await page.evaluate(() => PowerTest.flushPowerStats());
 // Predicate wait, no fixed sleep: one timer emits the coalesced notification.
 await page.evaluate(() => window.flushTestTimers());
 await page.evaluate(() => {
