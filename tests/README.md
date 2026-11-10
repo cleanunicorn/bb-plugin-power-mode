@@ -63,6 +63,12 @@ losing a 25+ streak each vibrate with their pattern, ordinary keystrokes do not,
 and `haptics: false` silences them. It captures patterns through the `setVibrate`
 test seam instead of calling `navigator.vibrate`.
 
+`paste-counting.browser.js` checks full character totals for clipboard paste,
+drop, null-data OS insertions, bulk text/replacement events and rich editors
+that cancel native paste. Pastes count once even when the editor emits
+`insertText`; bulk input leaves typing-speed records unchanged. Terminal input
+and undo/redo stay excluded.
+
 `thread-switch.browser.js` covers lingering effects after thread navigation (#17):
 twelve timeline swaps with streaming text while the agent starts and stops leave
 no canvas, bloom, vignette or HUD residue once activity ends; a render frame that

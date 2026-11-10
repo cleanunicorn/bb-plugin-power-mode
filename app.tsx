@@ -531,7 +531,7 @@ export function StatsAndAchievements() {
       <style>{GALLERY_CSS}</style>
       <div className="text-sm font-medium">Stats</div>
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-        <Stat label="Characters typed" value={stats.chars} />
+        <Stat label="Characters entered" value={stats.chars} />
         <Stat label="Best combo" value={stats.bestCombo} />
         <Stat label="Best WPM" value={stats.bestWpm} />
         <Stat label="Milestones hit" value={stats.milestones} />

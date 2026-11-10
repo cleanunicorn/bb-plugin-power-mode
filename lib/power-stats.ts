@@ -15,6 +15,7 @@ import { THEME_IDS, powerStorageKey, type ThemeId } from "./power-store";
 
 export interface PowerStats {
   collection: SavedCollection;
+  /** Characters entered, including paste, drop and dictation. */
   chars: number;
   deletes: number;
   pastes: number;
@@ -135,21 +136,21 @@ const LEGACY: (Omit<Achievement, "category" | "hidden" | "requires"> & {
     id: "chars-1k",
     icon: "✍️",
     title: "Wordsmith",
-    description: "Type 1,000 characters.",
+    description: "Enter 1,000 characters.",
     check: (s) => s.chars >= 1_000,
   },
   {
     id: "chars-10k",
     icon: "📜",
     title: "Novelist",
-    description: "Type 10,000 characters.",
+    description: "Enter 10,000 characters.",
     check: (s) => s.chars >= 10_000,
   },
   {
     id: "chars-100k",
     icon: "🏛️",
     title: "Legend of the Keys",
-    description: "Type 100,000 characters.",
+    description: "Enter 100,000 characters.",
     check: (s) => s.chars >= 100_000,
   },
   {
