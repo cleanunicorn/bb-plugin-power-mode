@@ -28,6 +28,10 @@ export interface PowerStats {
   bestPasteTier: number;
   /** Pastes upgraded by a lucky drop. */
   luckyDrops: number;
+  /** Longest run of ordnance pastes, each within five seconds of the last. */
+  bestPasteChain: number;
+  /** Combos (10+) rescued in the last 30% of the timer. */
+  clutches: number;
   themesTried: ThemeId[];
   /** achievement id → unlock time (ms since epoch) */
   unlocked: Record<string, number>;
@@ -46,6 +50,8 @@ export const EMPTY_STATS: PowerStats = {
   agentTurns: 0,
   bestPasteTier: 0,
   luckyDrops: 0,
+  bestPasteChain: 0,
+  clutches: 0,
   themesTried: [],
   unlocked: {},
 };
@@ -78,7 +84,7 @@ export interface StatsEvent {
 /** Night Owl window: 00:00 inclusive to 04:00 exclusive, local time. */
 export const NIGHT_OWL_END_HOUR = 4;
 
-/** Stats-driven badges. The first 19 are the original set; later ones read the paste ordnance counters. */
+/** Stats-driven badges. The first 19 are the original set; later ones read the paste ordnance and combo counters. */
 const LEGACY: (Omit<Achievement, "category" | "hidden" | "requires"> & {
   hidden?: boolean;
   requires?: ReadonlyArray<string>;
@@ -253,6 +259,24 @@ const LEGACY: (Omit<Achievement, "category" | "hidden" | "requires"> & {
     hidden: true,
     check: (s) => s.bestPasteTier >= 8,
   },
+  {
+    id: "chain-reaction",
+    icon: "🧨",
+    title: "Chain Reaction",
+    description: "Chain three pastes, each within five seconds of the last.",
+    flavor: "One more. It would be rude to stop now.",
+    requires: ["ordnance-stats"],
+    check: (s) => s.bestPasteChain >= 3,
+  },
+  {
+    id: "clutch-player",
+    icon: "⏱️",
+    title: "Clutch Player",
+    description: "Rescue a fading combo of 10 or more, 10 times.",
+    flavor: "The timer bar has trust issues now.",
+    requires: ["combo-stats"],
+    check: (s) => s.clutches >= 10,
+  },
 ];
 
 export const ACHIEVEMENTS: Achievement[] = [
@@ -372,6 +396,8 @@ function parse(raw: string | null): PowerStats {
       agentTurns: n("agentTurns"),
       bestPasteTier: Math.min(9, n("bestPasteTier")),
       luckyDrops: n("luckyDrops"),
+      bestPasteChain: n("bestPasteChain"),
+      clutches: n("clutches"),
       themesTried: Array.isArray(v.themesTried)
         ? THEME_IDS.filter((t) => (v.themesTried as unknown[]).includes(t))
         : [],

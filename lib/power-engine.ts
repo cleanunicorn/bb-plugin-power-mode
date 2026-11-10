@@ -24,8 +24,8 @@ import {
   type Intensity,
   type PowerSettings,
 } from "./power-store";
-import { hudChallenge } from "./achievement-presentation";
-import { onCollectionReset, getPowerStats, subscribePowerStats, flushPowerStats, recordStats, setUnlockHandler, type Achievement } from "./power-stats";
+import { availableTitles, hudChallenge, rarityOf, type Rarity } from "./achievement-presentation";
+import { ACHIEVEMENTS, onCollectionReset, getPowerStats, subscribePowerStats, flushPowerStats, recordStats, setUnlockHandler, type Achievement } from "./power-stats";
 import { ORDNANCE_SKINS, THEMES, type OrdnanceSkin, type OrdnanceSound, type Theme } from "./power-themes";
 
 // ---------------------------------------------------------------- tuning
@@ -41,6 +41,11 @@ const DPR = 1;
 const BLOOM_SCALE = 0.25;
 const HUE_STEP = 15;
 const WPM_WINDOW_MS = 8000;
+/** Ordnance pastes this close together build a chain. */
+const PASTE_CHAIN_MS = 5000;
+/** A keystroke in the last 30% of the combo timer is a clutch save. */
+const CLUTCH_LEFT = 0.3;
+const PHOTO_FINISH_LEFT = 0.06;
 const MATRIX_CHARS = "01アイウエオカキクケコサシスセソタチツテトﾊﾋﾌﾍﾎ<>{}=+*";
 
 const INTENSITY: Record<Intensity, { particles: number; shake: number; glyphs: number }> = {
@@ -177,7 +182,15 @@ function tierName(combo: number): string {
 
 // ---------------------------------------------------------------- types
 
-type ParticleKind = "spark" | "ember" | "shard" | "glyph" | "ring" | "bolt" | "pixel" | "petal" | "code" | "ordnance" | "smoke";
+type ParticleKind =
+  | "spark" | "ember" | "shard" | "glyph" | "ring" | "bolt" | "pixel" | "petal" | "code" | "ordnance" | "smoke"
+  | "shell" | "flare" | "scorch";
+
+/** Kinds that follow their own path or stay put: a singularity does not pull them. */
+function pullable(kind: ParticleKind): boolean {
+  return kind !== "ring" && kind !== "bolt" && kind !== "glyph" && kind !== "ordnance"
+    && kind !== "shell" && kind !== "flare" && kind !== "scorch";
+}
 
 type OrdVariant =
   | "cracker" | "stick" | "canister" | "bomblet" | "rocket" | "bomber"
@@ -217,6 +230,8 @@ interface Particle {
   text?: string;
   points?: number[];
   ord?: Ord;
+  /** A spark that twinkles with a four-point glint. */
+  star?: boolean;
 }
 
 interface ShakeState {
@@ -322,7 +337,22 @@ const CSS = `
 .pm-hud{position:fixed;top:56px;right:28px;z-index:2147483001;pointer-events:none;text-align:right;
   font-family:var(--pm-font);opacity:0;transform:translateX(30px) scale(.9);
   transition:opacity .25s ease,transform .25s cubic-bezier(.2,1.6,.4,1);will-change:transform,opacity}
-.pm-hud.pm-on{opacity:1;transform:none}
+.pm-hud{transform-origin:top right}
+.pm-hud.pm-on{opacity:1;transform:scale(var(--pm-hud-scale,1))}
+.pm-hud-next{font-size:10px;font-weight:800;letter-spacing:.18em;color:#fff;opacity:.6;min-height:13px;margin-top:1px}
+.pm-hud.pm-light .pm-hud-next{color:#111;text-shadow:0 0 6px #fff}
+.pm-hud.pm-record .pm-hud-label{color:#ffd76a;text-shadow:0 0 10px rgba(255,200,60,.9)}
+.pm-hud.pm-record .pm-hud-label::before{content:"👑 "}
+.pm-hud.pm-light.pm-record .pm-hud-label{color:#a16207;text-shadow:0 0 6px #fff}
+.pm-pop{position:fixed;z-index:2147483002;pointer-events:none;white-space:nowrap;font-family:var(--pm-font);
+  font-weight:900;font-style:italic;font-size:22px;letter-spacing:.06em;color:#fff;-webkit-text-stroke:1px var(--pm-deep);paint-order:stroke fill;
+  text-shadow:0 0 14px var(--pm-glow),2px 3px 0 var(--pm-deep);will-change:transform,opacity;
+  animation:pm-pop .95s cubic-bezier(.2,1.6,.4,1) forwards}
+.pm-pop.pm-retro{font-style:normal;letter-spacing:0}
+.pm-pop.pm-light{color:var(--pm-color);-webkit-text-stroke:2px #fff;text-shadow:2px 3px 0 var(--pm-deep),0 0 14px var(--pm-glow)}
+@keyframes pm-pop{0%{opacity:0;transform:translate(-50%,-50%) scale(.3) rotate(-12deg)}
+  16%{opacity:1;transform:translate(-50%,-50%) scale(1.3) rotate(-6deg)}28%{transform:translate(-50%,-50%) scale(1) rotate(-6deg)}
+  70%{opacity:1;transform:translate(-50%,-120%) scale(1) rotate(-6deg)}100%{opacity:0;transform:translate(-50%,-190%) scale(.94) rotate(-6deg)}}
 .pm-hud.pm-hot{animation:pm-hot 1s ease-in-out infinite alternate}
 @keyframes pm-hot{0%{filter:drop-shadow(0 0 6px var(--pm-glow))}100%{filter:drop-shadow(0 0 22px var(--pm-glow)) brightness(1.15)}}
 .pm-hud.pm-danger .pm-hud-label{color:#ff6b6b;text-shadow:0 0 10px rgba(255,80,80,.9)}
@@ -354,6 +384,12 @@ const CSS = `
 .pm-slam small{display:block;text-align:center;font-size:.22em;letter-spacing:.6em;font-style:normal;-webkit-text-stroke:0;margin-top:.2em}
 .pm-slam .pm-ch{display:inline-block;white-space:pre;animation:pm-ch .55s cubic-bezier(.2,1.8,.4,1) both;animation-delay:calc(var(--i) * 26ms)}
 @keyframes pm-ch{0%{opacity:0;transform:translateY(.55em) scale(1.7) rotate(9deg)}100%{opacity:1;transform:none}}
+.pm-slam.pm-streak::before{content:"";position:absolute;left:50%;top:50%;width:150vw;height:.85em;z-index:-1;pointer-events:none;
+  background:linear-gradient(90deg,transparent,var(--pm-glow) 28%,rgba(255,255,255,.85) 50%,var(--pm-glow) 72%,transparent);
+  mix-blend-mode:screen;animation:pm-streak .75s ease-out both}
+.pm-slam.pm-streak.pm-light::before{mix-blend-mode:normal;background:linear-gradient(90deg,transparent,var(--pm-glow) 35%,var(--pm-glow) 65%,transparent)}
+@keyframes pm-streak{0%{opacity:.95;transform:translate(-50%,-50%) scaleX(0)}30%{opacity:.7;transform:translate(-50%,-50%) scaleX(1) scaleY(.55)}
+  100%{opacity:0;transform:translate(-50%,-50%) scaleX(1.08) scaleY(.03)}}
 .pm-slam.pm-lost{font-size:clamp(26px,4vw,56px);color:#fff;-webkit-text-stroke:1px #7f1d1d;
   text-shadow:0 0 18px rgba(239,68,68,.8),3px 4px 0 #7f1d1d;animation:pm-lost 1.3s ease-in forwards}
 .pm-slam.pm-lost small{letter-spacing:.3em}
@@ -382,6 +418,30 @@ const CSS = `
   86%{opacity:1;transform:translate(-50%,0) scale(1)}100%{opacity:0;transform:translate(-50%,-28px) scale(.96)}}
 @keyframes pm-sheen{to{transform:translateX(130%)}}
 @keyframes pm-badge-icon{0%{transform:scale(0) rotate(-40deg)}100%{transform:scale(1) rotate(0)}}
+.pm-badge-icon{position:relative}
+.pm-badge-rays{position:absolute;inset:-40px;border-radius:50%;z-index:-1;opacity:.5;
+  background:repeating-conic-gradient(from 0deg,var(--pm-glow) 0 8deg,transparent 8deg 22.5deg);
+  -webkit-mask:radial-gradient(circle,#000 28%,transparent 68%);mask:radial-gradient(circle,#000 28%,transparent 68%);
+  animation:pm-rays 7s linear infinite}
+@keyframes pm-rays{to{transform:rotate(360deg)}}
+.pm-badge-more{display:flex;margin-left:6px}
+.pm-badge-more span{font-size:18px;line-height:1;width:30px;height:30px;display:grid;place-items:center;border-radius:50%;margin-left:-8px;
+  background:rgba(20,18,36,.92);box-shadow:0 0 0 1px var(--pm-color);animation:pm-badge-icon .5s cubic-bezier(.2,1.9,.4,1) both;
+  animation-delay:calc(.3s + var(--i) * 80ms)}
+.pm-badge.pm-light .pm-badge-more span{background:#fff}
+.pm-badge-meter{position:absolute;left:0;bottom:0;height:3px;width:var(--pm-from,0%);
+  background:linear-gradient(90deg,var(--pm-deep),var(--pm-color),#fff);box-shadow:0 0 8px var(--pm-glow);animation:pm-meter .9s ease .55s forwards}
+@keyframes pm-meter{to{width:var(--pm-to,0%)}}
+.pm-badge.pm-r-epic,.pm-badge.pm-r-legendary,.pm-badge.pm-r-secret{border-width:2px;padding:14px 28px 15px 16px}
+.pm-badge.pm-r-epic .pm-badge-title,.pm-badge.pm-r-legendary .pm-badge-title,.pm-badge.pm-r-secret .pm-badge-title{font-size:26px}
+.pm-badge.pm-r-legendary{border-color:transparent;
+  background:linear-gradient(135deg,rgba(12,12,24,.96),rgba(34,30,58,.94)) padding-box,
+    conic-gradient(from var(--pm-spin,0deg),#ff5f6d,#ffc371,#47e5a0,#38bdf8,#c084fc,#ff5f6d) border-box;
+  animation:pm-badge 3.4s cubic-bezier(.2,1.4,.4,1) both,pm-spin 3s linear infinite}
+.pm-badge.pm-r-legendary.pm-light{background:linear-gradient(135deg,rgba(255,255,255,.98),rgba(243,242,255,.96)) padding-box,
+    conic-gradient(from var(--pm-spin,0deg),#ff5f6d,#ffc371,#47e5a0,#38bdf8,#c084fc,#ff5f6d) border-box}
+@property --pm-spin{syntax:"<angle>";inherits:false;initial-value:0deg}
+@keyframes pm-spin{to{--pm-spin:360deg}}
 .pm-badge.pm-retro .pm-badge-title{font-style:normal}.pm-badge.pm-retro{border-radius:0}
 .pm-badge.pm-light{color:#111;background:linear-gradient(135deg,rgba(255,255,255,.97),rgba(243,242,255,.94));box-shadow:0 0 0 1px rgba(0,0,0,.06),0 0 30px var(--pm-glow),0 14px 40px rgba(0,0,0,.18)}
 .pm-badge.pm-light .pm-badge-kicker{color:var(--pm-deep)}
@@ -496,6 +556,19 @@ class Synth {
 
   powerDown() {
     this.tone(660, 0.5, "triangle", 0.25, 0, 60);
+  }
+
+  /** Firework shell bursting: a soft, short crack. `at` is a start offset (s). */
+  pop(at = 0) {
+    const f = 260 + Math.random() * 260;
+    this.tone(f, 0.16, "triangle", 0.09, at, f * 0.35);
+    this.tone(f * 3, 0.06, "square", 0.03, at);
+  }
+
+  /** Combo rescued at the last moment: two quick rising blips. */
+  clutch() {
+    this.tone(660, 0.09, "square", 0.1, 0, 990);
+    this.tone(990, 0.14, "triangle", 0.14, 0.08, 1480);
   }
 
   /** Combo broke: a short, sour slide down. */
@@ -710,6 +783,24 @@ function glowSprite(hue: number): HTMLCanvasElement {
   return sprite;
 }
 
+let scorchCache: HTMLCanvasElement | null = null;
+/** Dark soot blotch for impact marks. */
+function scorchSprite(): HTMLCanvasElement {
+  if (scorchCache) return scorchCache;
+  const sprite = document.createElement("canvas");
+  sprite.width = sprite.height = SPRITE_SIZE;
+  const c = sprite.getContext("2d")!;
+  const r = SPRITE_SIZE / 2;
+  const g = c.createRadialGradient(r, r, 0, r, r, r);
+  g.addColorStop(0, "rgba(8,6,10,.85)");
+  g.addColorStop(0.45, "rgba(12,10,14,.55)");
+  g.addColorStop(0.8, "rgba(16,14,18,.15)");
+  g.addColorStop(1, "rgba(16,14,18,0)");
+  c.fillStyle = g;
+  c.fillRect(0, 0, SPRITE_SIZE, SPRITE_SIZE);
+  return (scorchCache = sprite);
+}
+
 /** Cached `hsl()` strings so the render loop allocates no strings per particle. */
 const smokeSprites = new Map<string, HTMLCanvasElement>();
 /** Soft gray puff; darker on light pages so it reads as smoke, not haze. */
@@ -809,10 +900,11 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
   hud.className = "pm-hud";
   hud.setAttribute("aria-hidden", "true");
   hud.innerHTML =
-    '<div class="pm-hud-label">COMBO</div><div class="pm-hud-count">0</div><div class="pm-hud-tier"></div><div class="pm-hud-wpm"></div><div class="pm-hud-bar"><div class="pm-hud-fill"></div></div>';
+    '<div class="pm-hud-label">COMBO</div><div class="pm-hud-count">0</div><div class="pm-hud-tier"></div><div class="pm-hud-next"></div><div class="pm-hud-wpm"></div><div class="pm-hud-bar"><div class="pm-hud-fill"></div></div>';
   const hudLabel = hud.querySelector<HTMLElement>(".pm-hud-label")!;
   const hudCount = hud.querySelector<HTMLElement>(".pm-hud-count")!;
   const hudTier = hud.querySelector<HTMLElement>(".pm-hud-tier")!;
+  const hudNext = hud.querySelector<HTMLElement>(".pm-hud-next")!;
   const hudWpm = hud.querySelector<HTMLElement>(".pm-hud-wpm")!;
   const challenge=document.createElement("div");challenge.className="pm-hud-wpm pm-hud-challenge";
   challenge.style.cssText="font-size:11px;max-width:260px;line-height:1.5;letter-spacing:normal";
@@ -865,6 +957,11 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
   let themeBucket = -1;
   let tierText = "";
   let wpmText = "";
+  let nextText = "";
+  let hudScale = "";
+  /** This combo has passed the saved record. */
+  let recordPace = false;
+  let flameAcc = 0;
   const keyLog: { t: number; n: number }[] = [];
 
   // Agent combo (words the agent has written this turn)
@@ -1005,8 +1102,34 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
         spin: rand(-0.3, 0.3),
         angle: rand(0, Math.PI * 2),
         text: kind === "code" ? MATRIX_CHARS[Math.floor(Math.random() * MATRIX_CHARS.length)] : undefined,
+        star: kind === "spark" && Math.random() < 0.14,
       });
     }
+  }
+
+  /** Slots left for one-off effect particles, below the carrier reserve. */
+  function spare(): boolean {
+    return particles.length < maxParticles() - CARRIER_RESERVE;
+  }
+
+  /** A hot core that blooms and fades in a few frames, giving a blast its punch. */
+  function flare(x: number, y: number, hue: number, size: number, src: Theme = theme) {
+    // A local flash is still a flash; pixel art has no soft glow.
+    if (getReducedMotion() || src.shape === "pixel" || !spare()) return;
+    const life = 170 + 130 * size;
+    particles.push({ kind: "flare", x, y, vx: 0, vy: 0, life, maxLife: life, size: 36 + 120 * size, hue, spin: 0, angle: 0 });
+  }
+
+  /** Molten impact mark that cools and fades. Glow and code themes only; `size` 0–1. */
+  function scorch(x: number, y: number, hue: number, size: number, src: Theme = theme) {
+    if ((src.shape !== "glow" && src.shape !== "code") || !spare()) return;
+    const life = 900 + 1100 * size;
+    const r = 14 + 44 * size;
+    // Cracks: [angle, length, bend] triples radiating from the center.
+    const points: number[] = [];
+    const cracks = 5 + Math.round(size * 4);
+    for (let i = 0; i < cracks; i++) points.push((i / cracks) * Math.PI * 2 + rand(-0.35, 0.35), r * rand(0.55, 1.25), rand(-0.5, 0.5));
+    particles.push({ kind: "scorch", x, y, vx: 0, vy: 0, life, maxLife: life, size: r, hue, spin: 0, angle: 0, points });
   }
 
   function ring(x: number, y: number, hue: number, size: number, life = 520) {
@@ -1119,6 +1242,79 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
     timers.add(id);
   }
 
+  /** A cosmetic follow-up: dropped if Power Mode is switched off before it fires. */
+  function fx(fn: () => void, ms: number) {
+    const epoch = fxEpoch;
+    later(() => {
+      if (disposed || !settings.enabled || epoch !== fxEpoch) return;
+      fn();
+      start();
+    }, ms);
+  }
+
+  /** A small floating callout ("CLUTCH!", "CHAIN ×3") that pops and drifts up. */
+  function pop(text: string, x: number, y: number, hue: number) {
+    let live = 0;
+    for (const el of transient) if (el.classList.contains("pm-pop")) live++;
+    if (live >= 4) return;
+    const el = document.createElement("div");
+    el.className = `pm-pop${theme.id === "retro" ? " pm-retro" : ""}`;
+    el.setAttribute("aria-hidden", "true");
+    setTheme(el, hue);
+    el.style.left = `${clampTo(x, window.innerWidth, 90)}px`;
+    el.style.top = `${clampTo(y, window.innerHeight, 60)}px`;
+    el.textContent = text;
+    document.documentElement.appendChild(el);
+    transient.add(el);
+    later(() => { el.remove(); transient.delete(el); }, 980);
+  }
+
+  /** Where callouts about the combo appear: left of the HUD, clear of the counter. */
+  function hudSpot(): { x: number; y: number } {
+    return { x: window.innerWidth - 330, y: 110 };
+  }
+
+  /**
+   * A firework: a shell climbs from the bottom edge to (tx, ty), then bursts in
+   * the theme's own particles. The burst is scheduled, not detected in the frame loop.
+   */
+  function firework(tx: number, ty: number, hue: number, size = 1, delay = 0) {
+    // An open singularity owns the sky: nothing new launches until it bursts.
+    if (!settings.particles || pull) return;
+    const fly = rand(380, 520);
+    const launch = () => {
+      const H = window.innerHeight;
+      const sx = clampTo(tx + rand(-120, 120), window.innerWidth);
+      if (particles.length < maxParticles()) {
+        particles.push({
+          kind: "shell", x: sx, y: H + 8, vx: 0, vy: 0, life: fly, maxLife: fly, size: 2 + size, hue,
+          spin: rand(0, Math.PI * 2), angle: 0, points: [sx, H + 8, tx, ty],
+        });
+      }
+      fx(() => {
+        const mult = INTENSITY[settings.intensity].particles;
+        flare(tx, ty, hue, 0.3 * size);
+        burst(tx, ty, hue, 42 * size * mult, 6.5 * size);
+        burst(tx, ty, (hue + 45) % 360, 16 * size * mult, 3.2 * size);
+        ring(tx, ty, hue, 80 * size, 420);
+        if (settings.sound) synth.pop();
+      }, fly);
+    };
+    if (delay > 0) fx(launch, delay);
+    else launch();
+  }
+
+  /** `count` fireworks spread across the upper half of the window. */
+  function fireworks(count: number, hue: number, size = 1, hueStep = 40) {
+    const W = window.innerWidth;
+    const H = window.innerHeight;
+    for (let i = 0; i < count; i++) {
+      // Even columns with jitter, so a volley never bunches up in one corner.
+      const col = (i + 0.5) / count;
+      firework(W * (0.12 + 0.76 * col) + rand(-40, 40), H * rand(0.16, 0.42), (hue + i * hueStep) % 360, size * rand(0.85, 1.15), i * 110);
+    }
+  }
+
   function flash(hue: number, x = window.innerWidth / 2, y = window.innerHeight / 2, big = false) {
     // Reduced motion: no full-viewport flashes at all (the big one is a white-out).
     if (getReducedMotion()) return;
@@ -1142,7 +1338,9 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
   function slam(title: string, subtitle: string, hue: number, variant: "" | "quiet" | "agent" | "lost" = "", src: Theme = theme) {
     for (const el of transient) if (el.classList.contains("pm-slam")) { el.remove(); transient.delete(el); }
     const el = document.createElement("div");
-    el.className = `pm-slam${variant ? ` pm-${variant}` : ""}${src.id === "retro" ? " pm-retro" : ""}`;
+    // Big slams get a light streak wiping across behind the title.
+    const streak = variant === "" && !getReducedMotion();
+    el.className = `pm-slam${variant ? ` pm-${variant}` : ""}${streak ? " pm-streak" : ""}${src.id === "retro" ? " pm-retro" : ""}`;
     el.setAttribute("aria-hidden", "true");
     setTheme(el, hue);
     // Big slams land letter by letter; quiet ones (and reduced motion) stay a single run of text.
@@ -1170,28 +1368,63 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
     later(() => { el.remove(); transient.delete(el); }, variant === "quiet" ? 1150 : variant === "lost" ? 1350 : 1650);
   }
 
-  /** Achievement unlock banner: icon, kicker and title in the category's color, with a sheen sweep. */
-  function badgeBanner(a: Achievement, extra: number, hue: number) {
+  const RARITY_KICKER: Record<Rarity, string> = {
+    common: "ACHIEVEMENT UNLOCKED", rare: "RARE ACHIEVEMENT", epic: "EPIC ACHIEVEMENT",
+    legendary: "LEGENDARY ACHIEVEMENT", secret: "SECRET DISCOVERED",
+  };
+
+  /**
+   * Achievement unlock banner: icon over spinning rays, kicker and title in the
+   * category's color, a sheen sweep, the other badges of the batch and a
+   * collection meter that fills to the new total. `note` replaces the flavor line.
+   */
+  function badgeBanner(a: Achievement, others: readonly Achievement[], hue: number, note = "") {
     for (const el of transient) if (el.classList.contains("pm-badge")) { el.remove(); transient.delete(el); }
+    const extra = others.length;
+    const rarity = rarityOf(a);
     const el = document.createElement("div");
-    el.className = `pm-badge${theme.id === "retro" ? " pm-retro" : ""}`;
+    el.className = `pm-badge pm-r-${rarity}${theme.id === "retro" ? " pm-retro" : ""}`;
     el.setAttribute("aria-hidden", "true");
     setTheme(el, hue);
+    const unlocked = getPowerStats().unlocked;
+    const total = ACHIEVEMENTS.length;
+    const have = ACHIEVEMENTS.reduce((n, x) => n + (unlocked[x.id] ? 1 : 0), 0);
     const icon = document.createElement("div");
     icon.className = "pm-badge-icon";
     icon.textContent = a.icon;
+    if (!getReducedMotion()) {
+      const rays = document.createElement("div");
+      rays.className = "pm-badge-rays";
+      icon.appendChild(rays);
+    }
     const text = document.createElement("div");
     const kicker = document.createElement("div");
     kicker.className = "pm-badge-kicker";
-    kicker.textContent = a.hidden ? "SECRET DISCOVERED" : "ACHIEVEMENT UNLOCKED";
+    kicker.textContent = `${RARITY_KICKER[rarity]} · ${have}/${total}`;
     const title = document.createElement("div");
     title.className = "pm-badge-title";
     title.textContent = extra > 0 ? `${a.title} +${extra}` : a.title;
     const sub = document.createElement("div");
     sub.className = "pm-badge-sub";
-    sub.textContent = extra > 0 ? `${extra + 1} achievements unlocked at once` : (a.flavor ?? a.description);
+    sub.textContent = note || (extra > 0 ? `${extra + 1} achievements unlocked at once` : (a.flavor ?? a.description));
     text.append(kicker, title, sub);
     el.append(icon, text);
+    if (extra > 0) {
+      const more = document.createElement("div");
+      more.className = "pm-badge-more";
+      others.slice(0, 4).forEach((o, i) => {
+        const chip = document.createElement("span");
+        chip.style.setProperty("--i", String(i));
+        chip.textContent = o.icon;
+        more.appendChild(chip);
+      });
+      el.appendChild(more);
+    }
+    const meter = document.createElement("div");
+    meter.className = "pm-badge-meter";
+    meter.style.setProperty("--pm-from", `${(Math.max(0, have - 1 - extra) / total) * 100}%`);
+    meter.style.setProperty("--pm-to", `${(have / total) * 100}%`);
+    el.appendChild(meter);
     document.documentElement.appendChild(el);
     transient.add(el);
     later(() => { el.remove(); transient.delete(el); }, 3450);
@@ -1199,6 +1432,7 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
   }
 
   function explode(x: number, y: number, hue: number, mult: number) {
+    flare(x, y, hue, 0.7);
     burst(x, y, hue, 90 * mult, 13);
     if (theme.shape === "glow") burst(x, y, (hue + 40) % 360, 35 * mult, 7, "ember");
     smoke(x, y, 6 * mult, 1);
@@ -1227,10 +1461,14 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
     lucky: boolean;
     /** A combo milestone slammed on this paste: skip the small/warning slams. */
     milestone: boolean;
+    /** Position in a run of quick pastes (1 = not chained). */
+    chain: number;
   }
 
   /** Bumped on disable and dispose: stale detonation timers become no-ops. */
   let ordnanceEpoch = 0;
+  /** Bumped on disable, dispose and when a singularity opens: pending fireworks and callouts are dropped. */
+  let fxEpoch = 0;
   let pendingOrdnance = 0;
   /** A tier 7+ "event" (meteor shower, nuke, singularity) is running. */
   let eventActive = false;
@@ -1241,6 +1479,9 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
   let dim: HTMLElement | null = null;
   /** Combo added by pastes beyond the old flat +10; excluded from records. */
   let pasteBonus = 0;
+  /** Ordnance pastes in a row, each within PASTE_CHAIN_MS of the last. */
+  let pasteChain = 0;
+  let lastOrdnanceAt = -Infinity;
 
   function arm(fn: () => void, ms: number) {
     const epoch = ordnanceEpoch;
@@ -1271,11 +1512,14 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
   /** Drop everything in flight (disable, dispose). */
   function resetOrdnance() {
     ordnanceEpoch++;
+    fxEpoch++;
     pendingOrdnance = 0;
     eventActive = false;
     pull = null;
     pendingPaste = null;
     pasteBonus = 0;
+    pasteChain = 0;
+    lastOrdnanceAt = -Infinity;
     setDim(false);
   }
 
@@ -1320,6 +1564,12 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
   /** One explosion in the dropped skin; `size` 0–1. */
   function blast(d: Drop, x: number, y: number, size: number, opts: { flash?: boolean; big?: boolean; dir?: number } = {}) {
     const aimed = opts.dir !== undefined ? { src: d.src, dir: opts.dir, spread: 1.1 } : { src: d.src };
+    // Pushed first, so the debris draws over the mark and the hot core.
+    // Small pops (bomblets, dynamite) leave no mark and no flare: they come in swarms.
+    if (size >= 0.4) {
+      scorch(x, y, d.hue, size, d.src);
+      flare(x, y, d.hue, size, d.src);
+    }
     burst(x, y, d.hue, (20 + 70 * size) * d.power, 6 + 8 * size, debrisKind(d), aimed);
     if (d.src.shape === "glow") burst(x, y, (d.hue + 40) % 360, (6 + 24 * size) * d.power, 3 + 4 * size, "ember", { src: d.src });
     ring(x, y, d.hue, 60 + 280 * size, 400 + 320 * size);
@@ -1356,7 +1606,7 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
 
   function weaponSlam(d: Drop) {
     if (d.milestone && d.tier <= 2) return; // don't cut off the milestone slam for a pop
-    const sub = `${d.lucky ? "LUCKY DROP · " : ""}${d.chars.toLocaleString("en-US")} CHARS`;
+    const sub = `${d.lucky ? "LUCKY DROP · " : ""}${d.chain > 1 ? `CHAIN ×${d.chain} · ` : ""}${d.chars.toLocaleString("en-US")} CHARS`;
     slam(d.skin.titles[d.tier - 1], sub, d.hue, d.tier <= 2 ? "quiet" : "", d.src);
   }
 
@@ -1565,6 +1815,9 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
     const p = impactNear(x, y, 100, 180);
     const pullMs = 1200;
     carrier(d, "hole", { sx: p.x, sy: p.y, hold: pullMs + 200 });
+    // The hole owns the sky: fireworks still climbing or queued are swallowed.
+    fxEpoch++;
+    particles = particles.filter((q) => q.kind !== "shell");
     pull = { x: p.x, y: p.y };
     if (settings.sound) synth.implode(d.skin.sound, pullMs / 1000);
     arm(() => {
@@ -1592,21 +1845,35 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
     armedThisPaste = 0;
     lastTier = pick.tier;
     const tune = INTENSITY[settings.intensity];
+    const now = performance.now();
+    pasteChain = now - lastOrdnanceAt < PASTE_CHAIN_MS ? pasteChain + 1 : 1;
+    lastOrdnanceAt = now;
+    const chain = pasteChain;
     const d: Drop = {
-      skin: ORDNANCE_SKINS[theme.id], src: theme, hue: theme.hue(combo, performance.now()),
-      power: tune.particles, shake: tune.shake, chars, tier: pick.tier, lucky: pick.lucky, milestone,
+      skin: ORDNANCE_SKINS[theme.id], src: theme, hue: theme.hue(combo, now),
+      // Each link of a chain hits a little harder (up to +60%).
+      power: tune.particles * Math.min(1.6, 1 + 0.2 * (chain - 1)), shake: tune.shake,
+      chars, tier: pick.tier, lucky: pick.lucky, milestone, chain,
     };
     if (pick.lucky) {
-      // A four-leaf shower and a gold ring announce the upgrade before the weapon lands.
+      // A four-leaf shower, a gold ring and a gold firework announce the upgrade before the weapon lands.
       ring(x, y, 48, 170, 650);
       burst(x, y, 48, 24 * d.power, 5);
       if (settings.ghostLetters) for (let i = 0; i < 7; i++) glyph(x + rand(-30, 30), y, 48, "🍀", 1.1);
+      firework(clampTo(x + rand(-90, 90), window.innerWidth, 60), Math.max(50, y - rand(150, 230)), 48, 0.9);
+      pop("LUCKY!", x, y - 64, 48);
       if (settings.sound) synth.chime();
+    }
+    if (chain > 1) {
+      // The chain callout stacks under the lucky one; rings widen with the chain.
+      pop(`CHAIN ×${chain}`, x, y - (pick.lucky ? 96 : 64), d.hue);
+      ring(x, y, (d.hue + 180) % 360, 90 + Math.min(chain, 6) * 30, 480);
     }
     recordStats((s) => ({
       ...s,
       bestPasteTier: Math.max(s.bestPasteTier, pick.tier),
       luckyDrops: s.luckyDrops + (pick.lucky ? 1 : 0),
+      bestPasteChain: Math.max(s.bestPasteChain, chain),
     }));
     switch (pick.tier) {
       case 1: firecracker(d, x, y, pick.count); break;
@@ -1629,7 +1896,7 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
     for (const p of particles) {
       kinds[p.kind] = (kinds[p.kind] ?? 0) + 1;
       if (p.kind === "ordnance") ordnance++;
-      else if (pull && p.kind !== "ring" && p.kind !== "bolt" && p.kind !== "glyph") {
+      else if (pull && pullable(p.kind)) {
         sum += Math.hypot(p.x - pull.x, p.y - pull.y);
         n++;
       }
@@ -1662,10 +1929,20 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
     return value;
   }
 
-  function showHud(label: string, count: number, tier: string, hue: number) {
+  /** "13 TO GODLIKE": how far the combo is from its next milestone. */
+  function nextMilestone(count: number): string {
+    for (const m of MILESTONES) if (m.at > count) return `${m.at - count} TO ${m.title.replace(/!+$/, "")}`;
+    return `${(Math.floor(count / 250) + 1) * 250 - count} TO ∞ POWER ∞`;
+  }
+
+  function showHud(label: string, count: number, tier: string, hue: number, next = "") {
     hudLabel.textContent = label;
     hudCount.textContent = String(count);
     tierText = setText(hudTier, tier, tierText);
+    nextText = setText(hudNext, next, nextText);
+    // The counter swells as the combo climbs (up to +30% at 500).
+    const scale = label === "COMBO" ? (1 + Math.min(count, 500) / 500 * 0.3).toFixed(2) : "1";
+    if (scale !== hudScale) hud.style.setProperty("--pm-hud-scale", (hudScale = scale));
     applyTheme(hue);
     hud.classList.add("pm-on");
     hud.classList.toggle("pm-hot", label === "COMBO" && count >= 100 && !getReducedMotion());
@@ -1674,7 +1951,7 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
 
   function hideHudIfIdle() {
     if (combo === 0 && !agentHudActive) {
-      hud.classList.remove("pm-on", "pm-hot", "pm-danger");
+      hud.classList.remove("pm-on", "pm-hot", "pm-danger", "pm-record");
       vignette.style.opacity = "0";
       wpmText = setText(hudWpm, "", wpmText);
     }
@@ -1696,7 +1973,12 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
     // huge paste can't unlock combo achievements on its own.
     const earned = combo - pasteBonus;
     if (earned >= 25 && earned > settings.bestCombo) {
-      slam(`×${earned}`, "NEW RECORD", theme.hue(earned, performance.now()));
+      const hue = theme.hue(earned, performance.now());
+      const over = settings.bestCombo > 0 ? ` · +${earned - settings.bestCombo}` : "";
+      slam(`×${earned}`, `NEW RECORD${over}`, hue);
+      // A gold volley for the new best; bigger records earn more shells.
+      fireworks(earned >= 250 ? 5 : earned >= 100 ? 4 : 3, 45, 1.1, 12);
+      if (settings.ghostLetters) for (let i = 0; i < 4; i++) glyph(window.innerWidth / 2 + rand(-140, 140), window.innerHeight * 0.42, 45, "👑", 1.3);
       updatePowerSettings({ bestCombo: earned });
       if (settings.sound) synth.fanfare();
     } else if (earned >= 25) {
@@ -1709,8 +1991,9 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
       slam("COMBO LOST", `×${earned}`, 355, "lost");
       if (settings.sound) synth.lost();
     }
-    hud.classList.remove("pm-hot", "pm-danger");
+    hud.classList.remove("pm-hot", "pm-danger", "pm-record");
     combo = 0;
+    recordPace = false;
     pasteBonus = 0;
     keyLog.length = 0;
     hideHudIfIdle();
@@ -1726,6 +2009,10 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
     explode(x, y, hue, mult);
     explode(window.innerWidth / 2, window.innerHeight * 0.38, hue, mult * 0.5);
     slam(m.title, `${m.at} COMBO`, hue);
+    // Higher milestones earn a bigger show: one more firework per rank (none at 10).
+    const rank = m.at > 500 ? MILESTONES.length : MILESTONES.findIndex((x) => x.at === m.at);
+    fireworks(Math.min(rank, 6), hue, 0.9 + rank * 0.05);
+    if (rank >= 3) fx(() => ring(x, y, (hue + 30) % 360, Math.max(window.innerWidth, window.innerHeight) * 0.55, 900), 140);
     screenShake(10 * INTENSITY[settings.intensity].shake);
     if (settings.lightning) {
       const bolts = m.at >= 100 ? 4 : m.at >= 50 ? 3 : 1;
@@ -1737,41 +2024,88 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
 
   // ---- achievements
 
-  const unlockBatch: Achievement[]=[];
-  let unlockTimer=0;
-  const unresetUnlock=onCollectionReset(()=>{window.clearTimeout(unlockTimer);unlockTimer=0;unlockBatch.length=0;});
+  const unlockBatch: Achievement[] = [];
+  let unlockTimer = 0;
+  /** Cosmetic titles already earned, so a newly available one can be announced once. */
+  let knownTitles = new Set(availableTitles(getPowerStats()));
+  const unresetUnlock = onCollectionReset(() => {
+    window.clearTimeout(unlockTimer);
+    unlockTimer = 0;
+    unlockBatch.length = 0;
+    knownTitles = new Set();
+  });
+  const RARITY_RANK: Record<Rarity, number> = { common: 0, rare: 1, epic: 2, secret: 3, legendary: 4 };
+  const RARITY_SHELLS: Record<Rarity, number> = { common: 0, rare: 1, epic: 3, secret: 3, legendary: 5 };
+
+  /** The overlay celebration for a batch of unlocks; `replay` re-shows one from the gallery. */
+  function celebrate(batch: readonly Achievement[], replay: boolean) {
+    if (!batch.length || !settings.enabled || getReducedMotion()) return;
+    // The rarest badge of the batch leads the banner.
+    const lead = batch.reduce((best, a) => (RARITY_RANK[rarityOf(a)] > RARITY_RANK[rarityOf(best)] ? a : best), batch[0]);
+    const others = batch.filter((a) => a !== lead);
+    const rarity = rarityOf(lead);
+    // Secrets are gold; otherwise the category picks the color.
+    const hue = lead.hidden ? 45 : { Human: 48, Agent: 190, Together: 300 }[lead.category];
+    const stats = getPowerStats();
+    let note = "";
+    if (!replay) {
+      const fresh = availableTitles(stats).filter((t) => !knownTitles.has(t));
+      for (const t of fresh) knownTitles.add(t);
+      if (fresh.length) note = `New title to equip: ${fresh.join(", ")}`;
+    }
+    const complete = !replay && ACHIEVEMENTS.every((a) => stats.unlocked[a.id]);
+    attach();
+    // With particles off the toast is the whole feedback; no overlay banner.
+    const el = settings.particles ? badgeBanner(lead, others, hue, note) : null;
+    const r = el ? el.getBoundingClientRect() : null;
+    const cx = r && r.width ? r.left + r.width / 2 : window.innerWidth / 2;
+    const cy = r && r.height ? r.bottom : window.innerHeight * 0.2;
+    if (settings.particles) {
+      const mult = INTENSITY[settings.intensity].particles;
+      burst(cx, cy, hue, (lead.category === "Together" ? 90 : 60) * mult, 8);
+      burst(cx, cy, (hue + 40) % 360, 30 * mult, 5, "ember");
+      ring(cx, cy, hue, lead.category === "Together" ? 260 : 200, 650);
+      if (rarity !== "common") ring(cx, cy, (hue + 30) % 360, 140, 500);
+      if (settings.ghostLetters) for (const a of batch.slice(0, 5)) glyph(cx + rand(-70, 70), cy, hue, a.icon, 1.2);
+      // Rarer badges (or a bigger batch) launch more fireworks.
+      fireworks(Math.min(6, RARITY_SHELLS[rarity] + Math.min(others.length, 2)), hue, 1, rarity === "legendary" ? 60 : 25);
+    }
+    if (complete) {
+      fx(() => {
+        slam("COLLECTION COMPLETE", `${ACHIEVEMENTS.length} OF ${ACHIEVEMENTS.length} BADGES`, 45);
+        fireworks(6, 45, 1.3, 60);
+        if (settings.sound) synth.fanfare();
+      }, 900);
+    }
+    screenShake(rarity === "legendary" ? 8 : rarity === "common" ? 4 : 6);
+    if (settings.sound) {
+      synth.chime();
+      if (rarity === "legendary" || rarity === "epic") synth.fanfare();
+    }
+    start();
+  }
+
   function onUnlock(a: Achievement) {
     unlockBatch.push(a);
-    if(unlockTimer)return;
-    unlockTimer=window.setTimeout(()=>{
-      unlockTimer=0;const batch=unlockBatch.splice(0),first=batch[0];if(!first)return;
-      const copy={Human:"Finding your groove",Agent:"Co-pilot sighted",Together:"A lovely exchange"}[first.category];
-      toast(`${first.icon} ${copy}: ${batch.length===1?first.title:`${batch.length} achievements unlocked`}`, {
-        description:batch.length===1?(first.flavor??first.description):"Your collection has new stories.",
-        action:{label:"View gallery",onClick:()=>window.dispatchEvent(new Event("power-mode:gallery"))},
+    if (unlockTimer) return;
+    unlockTimer = window.setTimeout(() => {
+      unlockTimer = 0;
+      const batch = unlockBatch.splice(0), first = batch[0];
+      if (!first) return;
+      const copy = { Human: "Finding your groove", Agent: "Co-pilot sighted", Together: "A lovely exchange" }[first.category];
+      toast(`${first.icon} ${copy}: ${batch.length === 1 ? first.title : `${batch.length} achievements unlocked`}`, {
+        description: batch.length === 1 ? (first.flavor ?? first.description) : "Your collection has new stories.",
+        action: { label: "View gallery", onClick: () => window.dispatchEvent(new Event("power-mode:gallery")) },
       });
-      if(!settings.enabled||getReducedMotion())return;
-      // Secrets are gold; otherwise the category picks the color.
-      const hue=first.hidden?45:{Human:48,Agent:190,Together:300}[first.category];
-      attach();
-      // With particles off the toast is the whole feedback; no overlay banner.
-      const el=settings.particles?badgeBanner(first,batch.length-1,hue):null;
-      const r=el?el.getBoundingClientRect():null;
-      const cx=r&&r.width?r.left+r.width/2:window.innerWidth/2;
-      const cy=r&&r.height?r.bottom:window.innerHeight*0.2;
-      if(settings.particles){
-        const mult=INTENSITY[settings.intensity].particles;
-        burst(cx,cy,hue,(first.category==="Together"?90:60)*mult,8);
-        burst(cx,cy,(hue+40)%360,30*mult,5,"ember");
-        ring(cx,cy,hue,first.category==="Together"?260:200,650);
-        if(first.hidden)ring(cx,cy,(hue+30)%360,140,500);
-        if(settings.ghostLetters)for(let i=0;i<5;i++)glyph(cx+rand(-60,60),cy,hue,first.icon,1.2);
-      }
-      screenShake(first.hidden?6:4);
-      if(settings.sound)synth.chime();
-      start();
-    },150);
+      celebrate(batch, false);
+    }, 150);
   }
+  // The gallery replays an earned badge's celebration on request.
+  window.addEventListener("power-mode:replay-unlock", (event) => {
+    const id = (event as CustomEvent<unknown>).detail;
+    const a = ACHIEVEMENTS.find((x) => x.id === id);
+    if (a && getPowerStats().unlocked[a.id]) celebrate([a], true);
+  }, { signal });
   setUnlockHandler(onUnlock);
 
   // ---- user input
@@ -1856,6 +2190,9 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
     const { deleting, newline, pasted, data } = ev;
     const now = performance.now();
     if (now - lastKeyAt > COMBO_TIMEOUT_MS && combo > 0) endCombo();
+    // A keystroke while the timer bar is fading rescues the combo.
+    const left = combo >= 10 ? 1 - (now - lastKeyAt) / COMBO_TIMEOUT_MS : 1;
+    const clutch = left < CLUTCH_LEFT && !deleting;
     lastKeyAt = now;
     // Pastes with text drop ordnance; empty (image/file) pastes and pastes over
     // the caps keep the plain paste burst.
@@ -1907,7 +2244,30 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
     // After the milestone: weapon slams fire at detonation, after its slam.
     if (pick) dropOrdnance(pick, x, y, ev.chars, milestone !== null);
 
-    showHud("COMBO", combo, tierName(combo), hue);
+    showHud("COMBO", combo, tierName(combo), hue, nextMilestone(combo));
+    const earnedNow = combo - pasteBonus;
+    if (!recordPace && earnedNow >= 25 && earnedNow > settings.bestCombo) {
+      // Passed the saved record mid-combo: crown the HUD, and say so if there was a record to beat.
+      recordPace = true;
+      hud.classList.add("pm-record");
+      if (settings.bestCombo >= 25) {
+        const spot = hudSpot();
+        pop("NEW BEST!", spot.x, spot.y, 45);
+        if (!pull) {
+          ring(spot.x, spot.y, 45, 110, 500);
+          burst(spot.x, spot.y, 45, 18 * tune.particles, 5);
+        }
+        if (settings.sound) synth.chime();
+      }
+    } else if (clutch) {
+      const spot = hudSpot();
+      pop(left < PHOTO_FINISH_LEFT ? "PHOTO FINISH!" : "CLUTCH!", spot.x, spot.y, 140);
+      if (!pull) {
+        ring(spot.x, spot.y, 140, 80, 420);
+        burst(spot.x, spot.y, 140, 12 * tune.particles, 4);
+      }
+      if (settings.sound) synth.clutch();
+    }
     const speed = wpm(now);
     wpmText = setText(hudWpm, speed > 0 ? `${speed} WPM` : "", wpmText);
     vignette.style.opacity = (Math.round(heat * 10) / 20).toFixed(2); // ≤ .5, 11 steps
@@ -1918,6 +2278,7 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
       chars: s.chars + typed,
       deletes: s.deletes + (deleting ? 1 : 0),
       pastes: s.pastes + (pasted ? 1 : 0),
+      clutches: s.clutches + (clutch ? 1 : 0),
       bestCombo: Math.max(s.bestCombo, earned),
       bestWpm: keyLog.length >= 15 ? Math.max(s.bestWpm, speed) : s.bestWpm,
     }), { typed: typed > 0 });
@@ -2060,10 +2421,14 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
       const hue = theme.hue(next.at, now);
       slam(next.title, `${turn.words} WORDS`, hue, "agent");
       explode(window.innerWidth / 2, window.innerHeight * 0.3, hue, 0.5);
+      fireworks(next.at >= 600 ? 3 : next.at >= 150 ? 2 : 1, hue, 0.9);
       if (settings.lightning && next.at >= 300) bolt(window.innerWidth / 2, window.innerHeight * 0.3, hue);
       if (settings.sound) synth.fanfare();
     }
-    if (combo === 0) showHud("AGENT", turn.words, "WORDS", theme.hue(turn.words, now));
+    if (combo === 0) {
+      const ahead = AGENT_MILESTONES.find((m) => m.at > turn.words);
+      showHud("AGENT", turn.words, "WORDS", theme.hue(turn.words, now), ahead ? `${ahead.at - turn.words} TO ${ahead.title}` : "");
+    }
     start();
   }
 
@@ -2118,6 +2483,8 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
       const name = info.title.length > 32 ? `${info.title.slice(0, 31)}…` : info.title;
       slam("TURN COMPLETE", `${turn.words} WORDS · ${name}`, hue, "agent");
       explode(window.innerWidth / 2, window.innerHeight * 0.3, hue, 0.8);
+      // The finale scales with the reply: two shells, up to five for a 600-word turn.
+      fireworks(Math.min(5, 2 + Math.floor(turn.words / 200)), hue, 1, 50);
       if (settings.sound) synth.fanfare();
       start();
     }
@@ -2635,7 +3002,19 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
       if (left <= 0) endCombo();
       else {
         hudFill.style.transform = `scaleX(${left.toFixed(3)})`;
-        hud.classList.toggle("pm-danger", left < 0.3 && combo >= 10 && !getReducedMotion());
+        hud.classList.toggle("pm-danger", left < CLUTCH_LEFT && combo >= 10 && !getReducedMotion());
+        // Past 100 the counter burns: embers (or the theme's own sparks) rise from behind it.
+        // The fire is fed by typing: it dies down once the timer has drained a quarter.
+        if (combo >= 100 && left > 0.75 && settings.particles && !pull) {
+          flameAcc += dt;
+          if (flameAcc >= 70) {
+            flameAcc = 0;
+            const fxh = window.innerWidth - 28 - rand(8, 120);
+            const hue = theme.hue(combo, now);
+            if (theme.shape === "glow") burst(fxh, rand(96, 132), hue, 1, 1.8, "ember");
+            else burst(fxh, rand(96, 132), hue, 1, 1.6, sparkKind(), { dir: -Math.PI / 2, spread: 0.5 });
+          }
+        }
       }
     } else if (agentHudActive) {
       const left = 1 - (now - lastAgentAt) / AGENT_TIMEOUT_MS;
@@ -2688,7 +3067,7 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
         if (p.life <= 0) continue;
         particles[w++] = p;
         const t = p.life / p.maxLife; // 1 → 0
-        if (pull && p.kind !== "ring" && p.kind !== "bolt" && p.kind !== "glyph" && p.kind !== "ordnance") {
+        if (pull && pullable(p.kind)) {
           // Singularity: bend velocities toward the hole; swallow what reaches it.
           const dx = pull.x - p.x;
           const dy = pull.y - p.y;
@@ -2726,6 +3105,19 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
             }
             ctx.globalAlpha = t;
             ctx.drawImage(sprite, p.x - r, p.y - r, r * 2, r * 2);
+            if (p.star) {
+              // A four-point glint that flickers as the spark flies.
+              const arm = r * (1.5 + Math.sin(p.life / 45 + p.angle) * 0.9);
+              ctx.globalAlpha = t * 0.85;
+              ctx.strokeStyle = lightMode ? hsl(p.hue, 60) : "#fff";
+              ctx.lineWidth = 1;
+              ctx.beginPath();
+              ctx.moveTo(p.x - arm, p.y);
+              ctx.lineTo(p.x + arm, p.y);
+              ctx.moveTo(p.x, p.y - arm);
+              ctx.lineTo(p.x, p.y + arm);
+              ctx.stroke();
+            }
             if (useBloom && bctx) {
               const br = r * bloomRadius;
               bctx.globalAlpha = t;
@@ -2797,6 +3189,90 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
             ctx.fillStyle = hsl(p.hue, 55);
             ctx.fillRect(-p.size / 2, -p.size / 6, p.size, p.size / 3);
             ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+            break;
+          }
+          case "shell": {
+            // Tweened along its launch path (ease-out), with a short tapering tail.
+            const pts = p.points!;
+            const u = 1 - t;
+            const at = (v: number) => {
+              const e = 1 - (1 - v) * (1 - v);
+              return [pts[0] + (pts[2] - pts[0]) * e + Math.sin(v * 10 + p.spin) * 4, pts[1] + (pts[3] - pts[1]) * e] as const;
+            };
+            const [hx, hy] = at(u);
+            const [bx, by] = at(Math.max(0, u - 0.16));
+            p.x = hx;
+            p.y = hy;
+            ctx.globalAlpha = 0.25 + 0.5 * t;
+            ctx.strokeStyle = hsl(p.hue, 70);
+            ctx.lineWidth = p.size;
+            ctx.lineCap = "round";
+            ctx.beginPath();
+            ctx.moveTo(bx, by);
+            ctx.lineTo(hx, hy);
+            ctx.stroke();
+            ctx.lineCap = "butt";
+            ctx.globalAlpha = 1;
+            if (theme.shape === "pixel") {
+              ctx.globalCompositeOperation = "source-over";
+              ctx.fillStyle = hsl(p.hue, 60);
+              ctx.fillRect(Math.round(hx / 2) * 2 - 3, Math.round(hy / 2) * 2 - 3, 6, 6);
+              ctx.globalCompositeOperation = glowBlend();
+            } else {
+              const r = p.size * 3.4;
+              const sprite = glowSprite(p.hue);
+              ctx.drawImage(sprite, hx - r, hy - r, r * 2, r * 2);
+              if (useBloom && bctx) {
+                const br = r * bloomRadius;
+                bctx.globalAlpha = 0.9;
+                bctx.drawImage(sprite, hx - br, hy - br, br * 2, br * 2);
+              }
+            }
+            break;
+          }
+          case "flare": {
+            // Swells slightly while it fades fast (quadratic).
+            const r = p.size * (0.65 + 0.35 * (1 - t));
+            const sprite = glowSprite(p.hue);
+            ctx.globalAlpha = t * t * (lightMode ? 0.3 : 0.85);
+            ctx.drawImage(sprite, p.x - r, p.y - r, r * 2, r * 2);
+            if (useBloom && bctx) {
+              const br = r * 1.5;
+              bctx.globalAlpha = t * t * (lightMode ? 0.4 : 1);
+              bctx.drawImage(sprite, p.x - br, p.y - br, br * 2, br * 2);
+            }
+            break;
+          }
+          case "scorch": {
+            const pts = p.points ?? [];
+            // Soot stays, then fades over the last 40% of its life.
+            const soot = Math.min(1, t * 2.5);
+            ctx.globalCompositeOperation = "source-over";
+            ctx.globalAlpha = soot * (lightMode ? 0.5 : 0.75);
+            ctx.drawImage(scorchSprite(), p.x - p.size, p.y - p.size * 0.8, p.size * 2, p.size * 1.6);
+            ctx.globalCompositeOperation = glowBlend();
+            // The molten core and its cracks cool quickly.
+            const heat = t * t * t;
+            if (heat > 0.02) {
+              const cr = p.size * 0.75;
+              const sprite = glowSprite(p.hue);
+              ctx.globalAlpha = heat * (lightMode ? 0.35 : 0.8);
+              ctx.drawImage(sprite, p.x - cr, p.y - cr * 0.8, cr * 2, cr * 1.6);
+            }
+            const glow = Math.min(1, t * t * 1.6);
+            ctx.globalAlpha = glow * 0.9;
+            ctx.strokeStyle = hsl(p.hue, 68);
+            ctx.lineWidth = 1.4;
+            ctx.beginPath();
+            for (let k = 0; k + 2 < pts.length; k += 3) {
+              const a = pts[k];
+              const len = pts[k + 1];
+              const mid = a + pts[k + 2];
+              ctx.moveTo(p.x + Math.cos(a) * len * 0.12, p.y + Math.sin(a) * len * 0.1);
+              ctx.lineTo(p.x + Math.cos(mid) * len * 0.55, p.y + Math.sin(mid) * len * 0.44);
+              ctx.lineTo(p.x + Math.cos(a) * len, p.y + Math.sin(a) * len * 0.8);
+            }
+            ctx.stroke();
             break;
           }
           case "smoke": {
@@ -2960,6 +3436,9 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
     } else if (was && !next.enabled) {
       resetOrdnance();
       combo = 0;
+      recordPace = false;
+      hud.classList.remove("pm-hot", "pm-danger", "pm-record");
+      for (const el of transient) if (el.classList.contains("pm-pop") || el.classList.contains("pm-badge")) { el.remove(); transient.delete(el); }
       agentTurns.clear();
       agentHudActive = false;
       hud.classList.remove("pm-on");

@@ -12,6 +12,10 @@ kept in this repository.
   `tests/paste-ordnance.browser.js`
 - [x] Docs cleanup (#16): README is the single feature list; overview removed; data
   and limitations documented
+- [x] More awesome combos, pastes and unlocks: milestone/record/finale fireworks,
+  clutch saves, next-milestone HUD line, record crown, paste chains, scorch marks,
+  explosion flares, rarity-scaled unlock banners, gallery "Almost there" strip and
+  celebration replay, two new badges (Chain Reaction, Clutch Player)
 
 Deferred / not done
 - [ ] Boss fight (not selected in round 3)
