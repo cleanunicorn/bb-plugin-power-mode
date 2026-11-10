@@ -1,33 +1,84 @@
-# Power Mode
+<div align="center">
 
-Typing effects for bb, in the spirit of VS Code's Power Mode — turned up.
+# ⚡ POWER MODE ⚡
 
-## Demo video
+**YOUR KEYBOARD IS NOW AN ARCADE CABINET.**
 
-[![Power Mode demo: paste ordnance exploding around the bb composer](docs/media/power-mode-demo-poster.jpg)](https://cdn.jsdelivr.net/gh/cleanunicorn/bb-plugin-power-mode@81cac1e19cfeefbdefe92c90ce5973d0f70b509c/docs/media/power-mode-demo.mp4)
+`👾 RETRO 8-BIT` · `🔥 GODLIKE` · `✨ PARTICLES 1.5×` · `💡 GLOW 70%`
 
-▶️ **[Watch the 84-second demo](https://cdn.jsdelivr.net/gh/cleanunicorn/bb-plugin-power-mode@81cac1e19cfeefbdefe92c90ce5973d0f70b509c/docs/media/power-mode-demo.mp4)** (MP4, 1280×800, no sound; [file in the repo](docs/media/power-mode-demo.mp4)): turning Power Mode on, typing combos, paste ordnance, switching the theme in Settings, and an agent reply through its "TURN COMPLETE" finale. [How it was recorded](docs/demo-video.md).
+[![Power Mode: pixel explosions, typing combos and agent fireworks](docs/media/power-mode-preview.gif)](docs/media/power-mode-demo.mp4?raw=true)
 
-- Particle bursts from the caret, with a soft bloom glow (quarter-resolution, cheap). Fast sparks leave streaks and some twinkle with a four-point glint, debris bounces off the bottom of the window, and explosions flare at the core and leave drifting smoke
-- **Themes:** 🌈 Neon, 🔥 Inferno, 🟩 Matrix (falling code), 🌸 Sakura (drifting petals), 🌃 Cyberpunk, 👾 Retro 8-bit
-- **Particles** and **Glow** sliders; particle counts also drop automatically when frames get slow
-- **Vibration** (Settings, on by default): on phones whose browser supports the Vibration API (Chrome and other Chromium browsers on Android; not iOS Safari or Firefox), the device buzzes on big moments only — combo milestones (longer for higher ranks), a new record, COMBO LOST, nuke and singularity detonations, badge unlocks (scaled by rarity), a completed collection, agent milestones and turn finales. A weaker buzz never interrupts a stronger one still playing. Ordinary keystrokes never vibrate.
-- **Reduce motion** (Settings): follows the OS `prefers-reduced-motion` setting until you choose; your explicit choice then sticks across OS changes and reloads. When active there is no editor/screen shake, no full-screen flash (including the white-out on tier 7–9 pastes and combo slams), no lightning, no explosion flare, no light streak behind slams and no achievement banner. Particles (fireworks included), slam text, the vignette pulse and bloom are unchanged.
-- Editor shake on every keystroke; screen shake on Enter, paste, and combo milestones
-- Combo counter with WPM gauge, draining timer, tier titles, and milestone slams with explosions and lightning. Slam titles land letter by letter over a streak of light, and each milestone past the first launches fireworks (one more per rank, up to six). The HUD shows how far the next milestone is, swells as the combo climbs, and burns with rising embers past 100 while you keep typing. The timer bar flashes red with a "FADING" warning in its last 30%; a keystroke there is a "CLUTCH!" save ("PHOTO FINISH!" in the last 6%). Passing your record mid-combo crowns the HUD with a "NEW BEST!" callout, a new record ends in a gold firework volley, and a streak of 25+ that ends without a record shatters off the HUD with a "COMBO LOST" slam
-- Flying letters, red shards on Backspace, shockwave on Enter
-- **Paste ordnance:** pasting drops theme-styled ordnance that scales with the paste, across 9 levels from firecracker to singularity (see below)
-- **Agent Power Mode:** while an agent writes its reply, sparks fly from the newest text, an agent word combo builds ("AGENT IS COOKING" → "AGI ACHIEVED?!") with fireworks at each step, and a "TURN COMPLETE" finale plays when it finishes, with more fireworks for longer replies. Effects and word counts belong to the thread on screen: a background thread finishing never resets or claims the visible count, and each finale carries its own thread's words and title (turns that were only partly on screen count as turns but not toward best words)
-- **Stats & achievements:** 57 badges across Human, Agent, and Together, including hidden discoveries. Unlocks slide in as a banner with the badge icon over spinning rays, a sheen sweep, a collection meter that fills to the new total, and confetti in the category's color (gold for secrets). Badges have a cosmetic rarity (rare, epic, legendary): rarer ones get a louder banner and more fireworks, a newly earned title is announced in the banner, and completing the collection gets its own finale. The gallery shows a completion meter, per-category counts, an "Almost there" strip with the three closest badges, progress bars on locked badges, rarity labels and a NEW pill on this session's discoveries. Click an earned badge's icon to replay its celebration. Filter the gallery, pin a challenge, equip a cosmetic title, and revisit your local session postcard in Settings
-- Optional synth sound
+**[▶ WATCH THE 47-SECOND PIXEL CHAOS](docs/media/power-mode-demo.mp4?raw=true)** · **[⚡ EQUIP POWER MODE](#-press-start)**
 
-Toggle with the ⚡ button in the sidebar footer or Mod+Alt+P. Tune it under Settings → Power Mode.
+[Vertical video · 9:16](docs/media/power-mode-vertical.mp4?raw=true) · [Still preview](docs/media/power-mode-demo-poster.jpg) · Silent demo; flashing effects and screen shake.
 
-Typing effects apply to text editors and fields. Terminal input is excluded so its hidden input and cursor positioning stay under the terminal's control.
+</div>
 
-## Paste ordnance
+I was going to write one tiny prompt. Then my keyboard started throwing pixels. The combo climbed. The screen shook. **GODLIKE.** Obviously I had to keep going.
 
-Pasting (or dropping) text drops weapons near the caret. Bigger pastes drop bigger weapons:
+One more sentence. One more task. One more glorious explosion. My gamer brain has apparently decided that the backlog is a boss rush, and I am extremely here for it.
+
+Power Mode turns typing in [bb](https://getbb.app) into particles, combos, fireworks and ridiculous celebrations. The productivity buff? That's the fantasy: shiny feedback that makes you *want* to keep building. The explosions are real.
+
+## ⌨️ Type. Combo. Lose your entire mind.
+
+Every keystroke kicks out particles and flying letters. Backspace throws red shards. Enter lands a shockwave. Keep typing and the combo counter climbs through milestone slams, lightning and fireworks.
+
+The WPM gauge is right there. The timer is draining. You save the combo at the last instant: **CLUTCH!** Beat your record and the HUD crowns your run. I know these are pixels. I still want the pixels.
+
+## 💣 Pasting is an airstrike now.
+
+Typing brings the sparks and combo explosions. **Pasting drops the actual ordnance.** A little snippet gets dynamite; a bigger chunk calls in rockets; a wall of text brings a bomber. Retro 8-bit turns the weapons into chunky pixel sprites.
+
+There are weapons across 9 levels, from firecracker to singularity. Chain pastes within five seconds for bigger blasts, or catch a **LUCKY!** upgrade. Yes, there is a black hole. Yes, it eats the fireworks.
+
+## 🤖 PLAYER 2 HAS ENTERED THE CHAT
+
+**Your agent gets Power Mode too.** While its reply streams, sparks fly from the newest text and a separate word combo builds from **AGENT IS COOKING** toward **AGI ACHIEVED?!** When the turn finishes: **TURN COMPLETE**, with a bigger firework finale for longer replies.
+
+You type. It cooks. Both sides of the conversation get the victory screen. The video shows a real agent reply, not a canned animation.
+
+## 🏆 Loot for the part of my brain that loves shiny things
+
+**Stats & achievements:** 57 badges across Human, Agent, and Together. Hidden discoveries. Rare, epic and legendary unlocks. Confetti. Cosmetic titles. A collection meter that is absolutely going to make me say “just one more.”
+
+Pin a challenge beside your WPM, chase a personal best, or open the gallery and click an earned badge to replay its celebration. Revision and theme challenges count too; you do not have to be a speedrunner to collect cool stuff.
+
+**Haptics? Oh, we brought rumble.** On phones with browser vibration support, big moments buzz: combo milestones, records, badge unlocks, huge detonations and agent finales. Higher ranks get more punch. Ordinary keystrokes stay quiet. Enable **Vibration** in Settings; this needs a supporting browser/device, such as Chromium on Android, and does not work in iOS Safari.
+
+Optional synth blips and booms complete the loadout. The demo is silent; it cannot demonstrate physical haptics.
+
+## ⚡ Press start
+
+Already want the pixels? Install into your running [bb](https://getbb.app):
+
+```sh
+bb plugin install https://github.com/cleanunicorn/bb-plugin-power-mode
+```
+
+Review and accept the installation prompt, then:
+
+1. Click **⚡ Toggle Power Mode** in the sidebar footer, or press **Ctrl+Alt+P** (**⌘+Alt+P** on Mac).
+2. Open **Settings → Power Mode** and equip the demo loadout:
+
+   | Setting | Equip |
+   | --- | --- |
+   | Intensity | **Godlike** |
+   | Theme | **👾 Retro 8-bit** |
+   | Particles | **1.5×** |
+   | Glow | **70%** |
+   | Agent Power Mode | **On** |
+
+3. Type in a composer. Paste a snippet. Ask your agent something. Enjoy the completely unreasonable amount of celebration.
+
+Retro intentionally skips bloom to keep its pixels crisp; the Glow slider remains at 70% in this loadout. Switch themes to see the bloom.
+
+**Themes:** 🌈 Neon, 🔥 Inferno, 🟩 Matrix, 🌸 Sakura, 🌃 Cyberpunk, 👾 Retro 8-bit
+
+Requires bb 0.48+ and plugin SDK 0.6.132+ support. BB checks compatibility during installation.
+
+<details>
+<summary><strong>📖 Inspect the arsenal: all nine paste tiers</strong></summary>
 
 | Tier | Weapon | Paste size (chars) | Combo |
 |---|---|---|---|
@@ -41,51 +92,23 @@ Pasting (or dropping) text drops weapons near the caret. Bigger pastes drop bigg
 | 8 | Tactical nuke: siren, white-out, mushroom cloud, aftershocks | 60k–200k | +75 |
 | 9 | Singularity: a black hole pulls in every particle, then goes supernova | ≥ 200k | +100 |
 
-- About 1 paste in 12 is a **lucky drop**, upgraded one tier (never into tier 8 or 9). A gold ring, a gold firework, a "LUCKY!" callout and a shower of 🍀 announce it before the weapon lands.
-- Pasting again within five seconds builds a **chain**: a "CHAIN ×N" callout, and each link's explosions are 20% bigger (up to +60%).
-- In the Neon, Inferno, Cyberpunk and Matrix themes, blasts leave a molten scorch mark whose cracks glow and cool over a couple of seconds.
-- A singularity swallows any fireworks still in the air.
-- Ordnance earns badges: Bombardier (tier 5), Lucky Drop, Chain Reaction (a chain of three), Pyrotechnician (100 combo milestones) and one secret for the very largest pastes.
-- Each theme skins the weapons, their debris, slam titles and sound: Neon draws glowing outlines, Inferno solid iron and embers, Matrix monospace glyphs (`TNT`, `=>>`, `NULL` → `SEGFAULT`), Sakura paper firecrackers, cranes and lanterns with petals, Cyberpunk chromatic-split hardware, and Retro 8-bit pixel sprites. The skin is captured at drop, so switching themes mid-flight doesn't mix them.
-- Tiers 7–9 are events: one runs at a time, and a paste during one drops carpet bombing instead. At most 24 detonations are pending at once; past that a paste gets the plain burst. Image or file pastes (no text) also get the plain burst.
-- Impacts land at least 60 px from the caret. Intensity scales the explosions and shake; `lightning`, `screen shake`, `sound` and text protection apply as usual.
-- Combo records and achievements count at most +10 per paste, so a single huge paste can't unlock them.
-- Editors that cancel the native paste and insert the text themselves (ProseMirror-style) are detected from the `paste` event.
 
-## Discoveries and personal progress
+Paste sizes are approximate tier boundaries; the [reference](docs/power-mode-reference.md#paste-ordnance) covers lucky drops, chains and event limits. Combo records and achievements credit at most +10 per paste.
 
-New speed challenges measure sustained 30-second direct-input windows, rather than
-the HUD’s short burst WPM. Revision and theme challenges reward participation
-without requiring fast typing. Pasted, repeated and unknown-provenance input does
-not establish physical typing speed; committed IME input can count toward
-non-speed challenges. New input challenges observe supported BB composers.
+</details>
 
-Agent badges record complete replies observed while their thread is visible,
-with an observed start and successful completion—not correctness or solved tasks.
-Together badges follow composer input, accepted submission and a subsequent
-complete reply in the same thread. They describe an observed sequence, not proof
-that a particular draft caused the reply. Interrupted and partial observations
-do not earn full-reply rewards.
+<details>
+<summary><strong>⚙️ Tune the chaos, keep your progress</strong></summary>
 
-Locked discoveries stay anonymous until earned. Visible badges show progress;
-you may pin one beside WPM or equip one small cosmetic title. Speed pins include
-a quiet personal-best ghost. Settings includes a session postcard with bests,
-new discoveries and a next challenge. Sessions end after ten idle minutes or
-reload; persistent badges and counters survive. There are no streak penalties,
-leaderboards or remote achievement analytics. Draft/reply content is not persisted.
+- **Your comfort, your loadout.** Toggle individual effects, turn particles off, or use Reduce motion to suppress shake, full-screen flashes and lightning. It follows your OS until you make an explicit choice. Keep text clear softens effects near your writing.
+- **Where it works.** Text editors and fields, plus streaming agent replies. Terminal input is excluded. Achievement input tracking uses supported BB composers; agent rewards require a complete observed reply in the visible thread.
+- **Settings follow you.** Effect settings are saved on your bb server and synchronized across its browsers and devices.
+- **Badges stay local.** Stats and achievements live in this browser's local storage. Clearing site data removes them; multiple windows can overwrite each other's progress. No leaderboards, streak penalties or remote achievement analytics. Draft and reply content is not persisted by the achievement system.
 
-Particles can be turned off separately from density. New unlock feedback respects
-sound/effects settings and OS reduced motion, and combines simultaneous badges
-into one toast with a gallery action. The gallery is also available from Power
-Mode’s navigation panel.
+[Full behavior and storage details](docs/power-mode-reference.md) · [Achievement catalog](docs/achievements/catalog.md) · [Recording notes](docs/demo-video.md)
 
-The composer adapter relies on BB’s verified internal DOM containers and fails
-closed for unsupported layouts. See [the developer catalog](docs/achievements/catalog.md)
-and [host contract](docs/achievements/host-contract.md) for compatibility details.
+</details>
 
-## Data & limitations
+---
 
-- **Settings are saved on the bb server:** your Power Mode settings (on/off, intensity, theme, sliders, effect toggles, reduce motion, best combo) are saved in the plugin's storage on the bb server (`bb.storage.kv`, key `settings`). They survive clearing site data and follow you to every browser, profile and device that opens the same bb server. A change in one window reaches every other open window within a moment.
-- **Local copy:** each browser also keeps a copy in `localStorage` (`<plugin id>:power-mode:settings`) so effects start instantly; once the server answers, the saved settings replace it. The first time this version loads, existing local settings are uploaded. If the server can't be reached, changes are kept locally and uploaded when it is back. When two devices change settings at once, the last save wins.
-- **Stats and achievements stay in the browser:** lifetime stats/achievements live only in `localStorage` (`<plugin id>:power-mode:stats`). A new browser profile, private window, other browser or other device starts with empty stats, and clearing the site's data erases them.
-- **Multiple windows and stats:** stats are not synchronized yet. Each window loads stats once and saves its own in-memory copy about every 2 seconds, so with several windows open one window can overwrite progress (or undo a stats reset) made in another. Tracked in [#10](https://github.com/cleanunicorn/bb-plugin-power-mode/issues/10).
+**The next task is a boss fight. [Equip your keyboard.](#-press-start)**

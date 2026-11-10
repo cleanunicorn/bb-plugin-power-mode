@@ -1,4 +1,5 @@
-// Records the Power Mode demo video from a running bb (see docs/demo-video.md).
+// Historical Neon/Inferno recorder. The current Retro demo uses BetterWright.
+// See docs/demo-video.md before recording; settings now synchronize through the server.
 // Usage: node record.mjs <frames-dir>   (SEND=1 to really send the agent prompt)
 // Env: BB_URL (default http://127.0.0.1:38886), CHROME (default /usr/bin/google-chrome),
 //      DEMO_PROJECT (sidebar project for the agent turn, default bb-plugin-power-mode).
@@ -12,7 +13,8 @@ const BB = (process.env.BB_URL || 'http://127.0.0.1:38886').replace(/\/$/, '');
 const CHROME = process.env.CHROME || '/usr/bin/google-chrome';
 const PROJECT = process.env.DEMO_PROJECT || 'bb-plugin-power-mode';
 fs.rmSync(OUT,{recursive:true,force:true}); fs.mkdirSync(OUT);
-// Fresh profile: Power Mode settings live in localStorage, so the demo starts from defaults.
+// Fresh browser identity only: effect settings are server-synchronized.
+// This does NOT isolate settings from the user's other browsers.
 const PROFILE = fs.mkdtempSync(path.join(os.tmpdir(), 'power-mode-demo-'));
 const W=1280,H=800;
 const b = await puppeteer.launch({executablePath:CHROME, headless:'new', args:['--no-sandbox',`--window-size=${W},${H}`], defaultViewport:{width:W,height:H}, userDataDir: PROFILE});
