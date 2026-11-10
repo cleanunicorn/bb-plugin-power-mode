@@ -96,7 +96,7 @@ mid-event releases live shakes and flashes, normal effects return when reduction
 is off, and disposal removes the listener. Lightning is gated in `bolt()` but not
 asserted directly.
 
-`combo-feedback.browser.js` covers the COMBO LOST slam (a 25+ streak that ends under the record; short combos stay quiet) and the unlock banner, which appears with particles on and never with them off. It uses real timers and takes about ten seconds.
+`combo-feedback.browser.js` covers the COMBO LOST slam (a 25+ streak that ends under the record; short combos stay quiet), a clutch save and its counter, the next-milestone line on the HUD, the record crown, callout, margin and fireworks, a two-paste chain, and the unlock banner, which appears with particles on and never with them off. It uses real timers and takes about twenty seconds.
 
 `docs-counts.test.mjs` checks that the README's feature list matches the code: the
 achievement badge count, one theme name per `THEME_IDS` entry, and the ordnance table's

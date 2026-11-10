@@ -5,9 +5,12 @@ category, hidden visibility, authored requirements, flavor and eligible event
 families; `RULES` owns measurement targets. Category and visibility are independent.
 Keep requirement/progress copy in this catalog aligned when changing targets.
 The stats-driven definitions in `power-stats.ts` preserve all 19 original IDs and
-add four ordnance badges (`requires: ["ordnance-stats"]`, read from `bestPasteTier`,
-`luckyDrops` and `milestones`; `doomsday` is hidden). With the 32 event-driven
-additions there are 55 total badges. Do not expose locked hidden metadata in UI,
+add five ordnance badges (`requires: ["ordnance-stats"]`, read from `bestPasteTier`,
+`luckyDrops`, `bestPasteChain` and `milestones`; `doomsday` is hidden) and one combo
+badge (`requires: ["combo-stats"]`, read from `clutches`). With the 32 event-driven
+additions there are 57 total badges. `rarityOf` in `achievement-presentation.ts`
+assigns a cosmetic rarity (hidden badges are always `secret`); it only scales the
+unlock celebration and labels gallery cards. Do not expose locked hidden metadata in UI,
 accessible names, tooltips, progress, pins or the postcard.
 
 ## State and attribution

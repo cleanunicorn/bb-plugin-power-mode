@@ -8,7 +8,7 @@
 // - The plugin's Settings page has themes, particle/glow sliders, effect
 //   toggles, lifetime stats, and achievements.
 import { useEffect, useState, useSyncExternalStore } from "react";
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import {
   definePluginApp,
   experimental_useSidebarThreads,
@@ -48,6 +48,9 @@ import {
   availableTitles,
   challengeProgress,
   challengeProgressRatio,
+  closestChallenges,
+  rarityOf,
+  type Rarity,
 } from "./lib/achievement-presentation";
 import { getCollection, setCollectionPreference } from "./lib/power-stats";
 import { THEMES } from "@/lib/power-themes";
@@ -393,6 +396,33 @@ const CATEGORY_COLOR: Record<string, string> = {
 };
 const SECRET_COLOR = "hsl(45 100% 60%)";
 
+const RARITY_STYLE: Record<
+  Exclude<Rarity, "common" | "secret">,
+  { label: string; color: string }
+> = {
+  rare: { label: "RARE", color: "hsl(199 95% 60%)" },
+  epic: { label: "EPIC", color: "hsl(270 95% 72%)" },
+  legendary: { label: "LEGENDARY", color: "hsl(38 100% 58%)" },
+};
+
+/** Gallery-only motion: card sheen on hover, the NEW pulse and the legendary border. */
+const GALLERY_CSS = `
+.pmg-card{transition:transform .18s ease,box-shadow .18s ease}
+.pmg-card.pmg-got:hover{transform:translateY(-2px);box-shadow:0 6px 22px -8px var(--pmg-color)}
+.pmg-card.pmg-got::after{content:"";position:absolute;inset:0;pointer-events:none;
+  background:linear-gradient(115deg,transparent 38%,color-mix(in srgb,var(--pmg-color) 28%,transparent) 50%,transparent 62%);
+  transform:translateX(-130%)}
+.pmg-card.pmg-got:hover::after{transition:transform .7s ease;transform:translateX(130%)}
+.pmg-card.pmg-legendary.pmg-got{border-color:transparent;
+  background:linear-gradient(var(--card,Canvas),var(--card,Canvas)) padding-box,
+    linear-gradient(120deg,#ff5f6d,#ffc371,#47e5a0,#38bdf8,#c084fc) border-box}
+.pmg-new{animation:pmg-new 1.6s ease-in-out infinite}
+.pmg-replay{cursor:pointer;transition:transform .2s cubic-bezier(.2,1.9,.4,1)}
+.pmg-replay:hover,.pmg-replay:focus-visible{transform:scale(1.14) rotate(-6deg)}
+@keyframes pmg-new{0%,100%{box-shadow:0 0 6px var(--pmg-color)}50%{box-shadow:0 0 14px var(--pmg-color)}}
+@media (prefers-reduced-motion:reduce){.pmg-card,.pmg-replay{transition:none}.pmg-card.pmg-got::after{display:none}.pmg-new{animation:none}}
+`;
+
 function Meter({
   value,
   color,
@@ -446,8 +476,10 @@ export function StatsAndAchievements() {
   ).length;
   const completion = unlockedCount / ACHIEVEMENTS.length;
   const fresh = new Set(collection.session.discoveries);
+  const closest = closestChallenges(stats);
   return (
     <div className="space-y-3">
+      <style>{GALLERY_CSS}</style>
       <div className="text-sm font-medium">Stats</div>
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         <Stat label="Characters typed" value={stats.chars} />
@@ -574,6 +606,40 @@ export function StatsAndAchievements() {
             : "The collection is complete. Enjoy the view."}
         </p>
       </section>
+      {closest.length > 0 && (
+        <section
+          aria-label="Almost there"
+          className="rounded-lg border border-border bg-card p-3"
+        >
+          <div className="mb-2 text-xs font-bold tracking-widest text-muted-foreground">
+            ALMOST THERE
+          </div>
+          <ul className="grid gap-3 sm:grid-cols-3">
+            {closest.map(({ a, ratio }) => (
+              <li key={a.id} className="min-w-0">
+                <div className="flex items-center gap-2 text-sm">
+                  <span aria-hidden className="text-lg">
+                    {a.icon}
+                  </span>
+                  <span className="truncate font-semibold">{a.title}</span>
+                  <span className="ml-auto text-xs tabular-nums text-muted-foreground">
+                    {Math.floor(ratio * 100)}%
+                  </span>
+                </div>
+                <Meter
+                  value={ratio}
+                  color={CATEGORY_COLOR[a.category]}
+                  className="mt-1 h-1"
+                  label={`${a.title} closest progress`}
+                />
+                <div className="mt-1 truncate text-xs text-muted-foreground">
+                  {challengeProgress(a.id, stats)}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
       {!visible.length && <p>No discoveries in this view yet.</p>}
       <ul className="grid gap-2 sm:grid-cols-2">
         {visible.map((a) => {
@@ -604,15 +670,22 @@ export function StatsAndAchievements() {
             );
           const color = a.hidden ? SECRET_COLOR : CATEGORY_COLOR[a.category];
           const ratio = at ? null : challengeProgressRatio(a.id, stats);
+          const rarity = rarityOf(a);
+          const tier =
+            rarity === "common" || rarity === "secret"
+              ? null
+              : RARITY_STYLE[rarity];
           return (
             <li
               key={a.id}
               className={cn(
-                "relative flex items-center gap-3 overflow-hidden rounded-lg border px-3 py-2 pl-4",
+                "pmg-card relative flex items-center gap-3 overflow-hidden rounded-lg border px-3 py-2 pl-4",
                 at
-                  ? "border-border bg-card"
+                  ? "pmg-got border-border bg-card"
                   : "border-dashed border-border opacity-70",
+                rarity === "legendary" && "pmg-legendary",
               )}
+              style={{ "--pmg-color": color } as CSSProperties}
             >
               <span
                 aria-hidden
@@ -623,32 +696,51 @@ export function StatsAndAchievements() {
                   boxShadow: at ? `0 0 10px ${color}` : undefined,
                 }}
               />
-              <span
-                className={cn(
-                  "grid size-10 flex-none place-items-center rounded-full text-2xl",
-                  !at && "grayscale",
-                )}
-                style={
-                  at
-                    ? {
-                        background: `radial-gradient(circle, color-mix(in srgb, ${color} 35%, transparent), transparent 72%)`,
-                        boxShadow: `inset 0 0 0 1px color-mix(in srgb, ${color} 60%, transparent)`,
-                      }
-                    : undefined
-                }
-                aria-hidden
-              >
-                {at ? a.icon : "🔒"}
-              </span>
+              {at ? (
+                <button
+                  type="button"
+                  className="pmg-replay grid size-10 flex-none place-items-center rounded-full text-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  style={{
+                    background: `radial-gradient(circle, color-mix(in srgb, ${color} 35%, transparent), transparent 72%)`,
+                    boxShadow: `inset 0 0 0 1px color-mix(in srgb, ${color} 60%, transparent)`,
+                  }}
+                  title="Replay the celebration"
+                  aria-label={`Replay the ${a.title} celebration`}
+                  onClick={() =>
+                    window.dispatchEvent(
+                      new CustomEvent("power-mode:replay-unlock", {
+                        detail: a.id,
+                      }),
+                    )
+                  }
+                >
+                  <span aria-hidden>{a.icon}</span>
+                </button>
+              ) : (
+                <span
+                  className="grid size-10 flex-none place-items-center rounded-full text-2xl grayscale"
+                  aria-hidden
+                >
+                  🔒
+                </span>
+              )}
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
                   <div className="text-sm font-semibold">{a.title}</div>
                   {at && fresh.has(a.id) && (
                     <span
-                      className="rounded-full px-1.5 py-px text-[10px] font-bold tracking-widest text-background"
-                      style={{ background: color, boxShadow: `0 0 8px ${color}` }}
+                      className="pmg-new rounded-full px-1.5 py-px text-[10px] font-bold tracking-widest text-background"
+                      style={{ background: color }}
                     >
                       NEW
+                    </span>
+                  )}
+                  {tier && (
+                    <span
+                      className="text-[10px] font-bold tracking-widest"
+                      style={{ color: tier.color, opacity: at ? 1 : 0.7 }}
+                    >
+                      {tier.label}
                     </span>
                   )}
                   {at && a.hidden && (

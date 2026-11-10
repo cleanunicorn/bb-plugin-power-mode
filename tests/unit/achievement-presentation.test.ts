@@ -44,3 +44,45 @@ describe("challengeProgressRatio", () => {
     expect(m.challengeProgress("lucky-drop", stats)).toBe("0 / 1 lucky drops");
   });
 });
+
+describe("combo and chain badges", () => {
+  it("unlock from the clutch and paste-chain counters and report progress", async () => {
+    const m = await fresh();
+    m.recordStats((s) => ({ ...s, clutches: 7, bestPasteChain: 2 }));
+    let stats = m.getPowerStats();
+    expect(stats.unlocked["clutch-player"]).toBeUndefined();
+    expect(m.challengeProgress("clutch-player", stats)).toBe("7 / 10 clutch saves");
+    expect(m.challengeProgressRatio("chain-reaction", stats)).toBeCloseTo(2 / 3);
+    m.recordStats((s) => ({ ...s, clutches: 10, bestPasteChain: 3 }));
+    stats = m.getPowerStats();
+    expect(stats.unlocked["clutch-player"]).toBeTruthy();
+    expect(stats.unlocked["chain-reaction"]).toBeTruthy();
+  });
+});
+
+describe("rarityOf", () => {
+  it("ranks secrets apart and defaults to common", async () => {
+    const m = await fresh();
+    const of = (id: string) => m.rarityOf(m.ACHIEVEMENTS.find((a) => a.id === id)!);
+    expect(of("first-spark")).toBe("common");
+    expect(of("combo-100")).toBe("rare");
+    expect(of("combo-250")).toBe("epic");
+    expect(of("combo-500")).toBe("legendary");
+    expect(of("doomsday")).toBe("secret");
+    // Every hidden badge is a secret, whatever its id.
+    for (const a of m.ACHIEVEMENTS.filter((a) => a.hidden)) expect(m.rarityOf(a)).toBe("secret");
+  });
+});
+
+describe("closestChallenges", () => {
+  it("lists started, locked, visible badges by progress and never a secret", async () => {
+    const m = await fresh();
+    expect(m.closestChallenges(m.getPowerStats())).toEqual([]);
+    m.recordStats((s) => ({ ...s, bestCombo: 45, deletes: 100, bestPasteTier: 7 }));
+    const stats = m.getPowerStats();
+    const closest = m.closestChallenges(stats, 3);
+    expect(closest.map((c) => c.a.id)).toEqual(["combo-50", "combo-100", "deletes-500"]);
+    expect(closest[0].ratio).toBeCloseTo(0.9);
+    expect(m.closestChallenges(stats, 50).some((c) => c.a.hidden || stats.unlocked[c.a.id])).toBe(false);
+  });
+});

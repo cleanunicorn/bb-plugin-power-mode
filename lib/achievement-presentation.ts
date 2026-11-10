@@ -79,6 +79,13 @@ export function challengeProgress(id: string, stats: PowerStats): string {
       return `${Math.min(stats.milestones, 100)} / 100 milestones`;
     if (id === "doomsday")
       return `${Math.min(stats.bestPasteTier, 8)} / 8 best paste tier`;
+    if (id === "chain-reaction")
+      return `${Math.min(stats.bestPasteChain, 3)} / 3 best paste chain`;
+    return "A moment to discover";
+  }
+  if (a.requires.includes("combo-stats")) {
+    if (id === "clutch-player")
+      return `${Math.min(stats.clutches, 10)} / 10 clutch saves`;
     return "A moment to discover";
   }
   const p = progress(id, getCollection());
@@ -120,4 +127,30 @@ export function hudChallenge(stats: PowerStats): string {
   ]
     .filter(Boolean)
     .join(" · ");
+}
+
+export type Rarity = "common" | "rare" | "epic" | "legendary" | "secret";
+const RARE = new Set([
+  "combo-100", "chars-10k", "wpm-60", "agent-500", "theme-tourist", "bombardier",
+  "lucky-drop", "chain-reaction", "clutch-player", "ghost-chaser", "stairway-flow",
+]);
+const EPIC = new Set(["combo-250", "wpm-100", "agent-turns-25", "pyrotechnician", "afterburner"]);
+const LEGENDARY = new Set(["combo-500", "chars-100k", "wpm-140"]);
+/** Cosmetic rarity: it only picks how loud the unlock celebration and gallery card are. */
+export function rarityOf(a: { id: string; hidden: boolean }): Rarity {
+  if (a.hidden) return "secret";
+  if (LEGENDARY.has(a.id)) return "legendary";
+  if (EPIC.has(a.id)) return "epic";
+  return RARE.has(a.id) ? "rare" : "common";
+}
+/**
+ * Up to `limit` locked, visible badges that are closest to unlocking
+ * (highest measurable progress first; untouched ones are left out).
+ */
+export function closestChallenges(stats: PowerStats, limit = 3) {
+  return ACHIEVEMENTS.filter((a) => !a.hidden && !stats.unlocked[a.id])
+    .map((a) => ({ a, ratio: challengeProgressRatio(a.id, stats) ?? 0 }))
+    .filter((x) => x.ratio > 0 && x.ratio < 1)
+    .sort((x, y) => y.ratio - x.ratio)
+    .slice(0, limit);
 }

@@ -272,9 +272,13 @@ const result = await page.evaluate(async () => {
   paste(field, 300000, { text: big });
   advance(3);
   const d0 = debug().pullDistance;
-  advance(40);
+  // Measure while most particles are still alive. Later on only a few far-flung
+  // survivors remain (the hole has swallowed the near ones), so their mean
+  // distance can rise even though everything is moving inward.
+  advance(12);
   const d1 = debug().pullDistance;
   assert(d0 !== null && d1 !== null && d1 < d0, `Singularity must pull particles in (${d0} → ${d1})`);
+  advance(28);
   settle();
 
   // ---- lightning / screenShake / sound
