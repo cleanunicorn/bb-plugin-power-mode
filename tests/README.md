@@ -75,7 +75,8 @@ Firefox (trailing input after `compositionend`) and Safari
 (`deleteCompositionText` and `insertFromComposition` before it) event orders on
 the `<textarea>` and the contenteditable. Updates add no characters, deletes or
 WPM; the commit adds exactly 4; the combo rises once per update in every order.
-It also covers a cancelled composition, composing over a selection, flying
+It also covers a next composition or a plain character arriving in the same
+task as the commit (counted once each), a cancelled composition, composing over a selection, flying
 letters for the new character only (through the `ordnanceDebug().glyphs` seam),
 burst and best WPM from commits only, and unchanged plain typing, paste and
 deletion. Synthetic events cannot drive an OS IME, so real IMEs still need a

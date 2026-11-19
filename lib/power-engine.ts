@@ -2298,7 +2298,25 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
   let composing: Composition | null = null;
   const COMPOSITION_INPUTS = new Set(["insertCompositionText", "deleteCompositionText", "insertFromComposition"]);
 
+  interface PendingCommit { target: HTMLElement; base: string; epoch: number }
+  let pendingCommit: PendingCommit | null = null;
+
+  /**
+   * Count a finished composition. It waits for the commit's own input events
+   * (Firefox sends one after `compositionend`), but the next composition or a
+   * plain character can follow in the same task, so those resolve it first,
+   * with `after` set to the text before they changed it.
+   */
+  function flushCommit(after?: string) {
+    const p = pendingCommit;
+    pendingCommit = null;
+    if (!p || disposed || !settings.enabled || p.epoch !== ordnanceEpoch || !p.target.isConnected) return;
+    const n = insertedLength(p.base, after ?? editorText(p.target));
+    if (n > 0) commitComposition(n);
+  }
+
   function onCompositionStart(event: Event) {
+    flushCommit(); // the DOM still holds the previous commit only
     const target = editableTarget(event.composedPath()[0] ?? event.target);
     composing = target ? { target, base: editorText(target), last: "" } : null;
   }
@@ -2308,16 +2326,9 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
     composing = null;
     const target = editableTarget(event.composedPath()[0] ?? event.target);
     if (!c || c.target !== target) return;
-    const epoch = ordnanceEpoch;
-    // Let the commit's own input events (Firefox sends one after this) land first.
-    later(() => {
-      if (disposed || !settings.enabled || epoch !== ordnanceEpoch) return;
-      if (!c.target.isConnected) return;
-      const text = editorText(c.target);
-      editorTexts.set(c.target, text);
-      const n = insertedLength(c.base, text);
-      if (n > 0) commitComposition(n);
-    }, 0);
+    const slot: PendingCommit = { target: c.target, base: c.base, epoch: ordnanceEpoch };
+    pendingCommit = slot;
+    later(() => { if (pendingCommit === slot) flushCommit(); }, 0);
   }
   document.addEventListener("compositionstart", onCompositionStart, { capture: true, signal });
   document.addEventListener("compositionend", onCompositionEnd, { capture: true, signal });
@@ -2363,11 +2374,12 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
     if (!settings.enabled) return;
     const inputEvent = event as InputEvent;
     const inputType = inputEvent.inputType ?? "insertText";
-    if (inputType.startsWith("history")) return;
     if (inputEvent.isComposing || composing || COMPOSITION_INPUTS.has(inputType)) {
       onCompositionInput(target, inputEvent, inputType, text);
       return;
     }
+    if (pendingCommit) flushCommit(pendingCommit.target === target ? previous : undefined);
+    if (inputType.startsWith("history")) return;
     const deleting = inputType.startsWith("delete");
     const newline = inputType === "insertParagraph" || inputType === "insertLineBreak" || inputEvent.data === "\n";
     const pasted = inputType === "insertFromPaste" || inputType === "insertFromDrop" ||
@@ -3685,6 +3697,7 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
     if (modeCheck) cancelAnimationFrame(modeCheck);
     agentHooks = null;
     composing = null;
+    pendingCommit = null;
     setUnlockHandler(null);
     unsubscribeChallenge();
     unresetUnlock();

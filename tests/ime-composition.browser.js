@@ -35,7 +35,7 @@ const result = await page.evaluate(async () => {
   const WORD = 'にほんご';
 
   /** Replays one composition; `order` picks the browser's event sequence. */
-  async function compose(el, { order = 'chrome', prefix = '', suffix = '', steps = STEPS, commit = WORD, onUpdate } = {}) {
+  async function compose(el, { order = 'chrome', prefix = '', suffix = '', steps = STEPS, commit = WORD, onUpdate, settle = true } = {}) {
     el.focus();
     write(el, prefix + suffix, prefix.length);
     composition(el, 'compositionstart', '');
@@ -55,7 +55,7 @@ const result = await page.evaluate(async () => {
     write(el, final, prefix.length + commit.length);
     composition(el, 'compositionend', commit);
     if (order === 'firefox') input(el, 'insertCompositionText', commit, false);
-    await tick();
+    if (settle) await tick();
   }
 
   let checks = 0;
@@ -86,6 +86,26 @@ const result = await page.evaluate(async () => {
       assert(after.deletes === before.deletes, `${name} ${order}: no delete counted`);
       assert(combo() - comboBefore === STEPS.length, `${name} ${order}: combo rises once per update, got ${combo() - comboBefore}`);
       checks++;
+    }
+
+    // The next composition, or a plain character, can follow the commit within
+    // the same task: neither may be counted as part of the committed text.
+    for (const order of ['chrome', 'firefox', 'safari']) {
+      for (const next of ['composition', 'insertText']) {
+        write(el, '');
+        const before = stats().chars;
+        await compose(el, { order, settle: false });
+        if (next === 'composition') await compose(el, { order, prefix: read(el), steps: ['k', 'か'], commit: 'か' });
+        else {
+          // Real order: beforeinput, then the DOM change, then input.
+          el.dispatchEvent(new InputEvent('beforeinput', { bubbles: true, cancelable: true, inputType: 'insertText', data: ' ' }));
+          write(el, read(el) + ' ');
+          el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: ' ' }));
+          await tick();
+        }
+        assert(stats().chars - before === 5, `${name} ${order} then ${next}: expected +5, got ${stats().chars - before}`);
+        checks++;
+      }
     }
 
     // Cancelled composition: text returns to its base.
