@@ -3,8 +3,10 @@ import { installWindow } from "./window-stub";
 
 const STATS_KEY = "bb-plugin-power-mode:power-mode:stats";
 
+/** Fresh modules with the store initialised, as the content script does. */
 async function freshStats() {
   vi.resetModules();
+  (await import("../../lib/power-store")).initPowerStore("bb-plugin-power-mode");
   return import("../../lib/power-stats");
 }
 

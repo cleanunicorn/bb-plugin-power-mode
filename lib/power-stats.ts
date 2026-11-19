@@ -9,6 +9,13 @@
 // the local delta (`stats - synced`) into whatever is there. A reset writes a
 // new random `epoch`; a window that sees a different epoch drops its pending
 // delta and adopts storage, so a stale window cannot bring back old stats.
+//
+// The storage key needs the plugin id, which only exists once `initPowerStore`
+// ran. Before that the module never reads, writes, locks or listens to storage:
+// activity accumulates in memory against an empty baseline, and unlock checks
+// wait. Init re-baselines synchronously from the real key (stored document
+// plus the pre-init delta), then notifies, checks unlocks and saves in a
+// microtask, so it is safe when init runs during a React render.
 
 import {
   CATALOG,
@@ -20,7 +27,13 @@ import {
   type AchievementEvent,
   type Category,
 } from "./achievement-rules";
-import { THEME_IDS, powerStorageKey, type ThemeId } from "./power-store";
+import {
+  THEME_IDS,
+  isPowerStoreInitialized,
+  onPowerStoreInit,
+  powerStorageKey,
+  type ThemeId,
+} from "./power-store";
 
 export interface PowerStats {
   collection: SavedCollection;
@@ -496,22 +509,22 @@ function notify() {
   for (const l of listeners) l();
 }
 
-function ensureLoaded() {
-  if (loaded) return;
-  loaded = true;
-  const doc = readDoc(); // never written back here: only a later flush writes
-  stats = doc.stats;
-  synced = structuredClone(doc.stats);
-  epoch = doc.epoch;
-  storedPresent = doc.present;
+/** Storage is only touched once the plugin id (and so the key) is known. */
+const keyKnown = isPowerStoreInitialized;
+
+function watchStorage() {
   try {
     window.addEventListener("storage", onStorage);
     window.addEventListener("pagehide", flushPowerStatsSync);
   } catch {
     // no window: best-effort
   }
+}
+
+/** Point `collection.saved` at `stats.collection`, adding the catalog unlocks. */
+function adoptSavedCollection() {
   const storedPin = stats.collection.pin;
-  collection = createCollection(stats.collection);
+  collection.saved = parseCollection(stats.collection);
   collection.saved.pin = storedPin;
   for (const a of CATALOG)
     if (stats.unlocked[a.id])
@@ -522,6 +535,51 @@ function ensureLoaded() {
     unlocked: { ...stats.unlocked, ...collection.saved.unlocked },
   };
 }
+
+function ensureLoaded() {
+  if (loaded) return;
+  loaded = true;
+  if (!keyKnown()) {
+    // Memory only until init re-baselines from the real key.
+    stats = EMPTY_STATS;
+    synced = structuredClone(EMPTY_STATS);
+    collection = createCollection();
+    adoptSavedCollection();
+    return;
+  }
+  const doc = readDoc(); // never written back here: only a later flush writes
+  stats = doc.stats;
+  synced = structuredClone(doc.stats);
+  epoch = doc.epoch;
+  storedPresent = doc.present;
+  watchStorage();
+  collection = createCollection();
+  adoptSavedCollection();
+}
+
+/**
+ * Runs inside `initPowerStore` when stats were used before the key was known:
+ * merge the pre-init activity into the stored document and adopt it as the
+ * baseline. No reset listeners fire; the observer session is kept.
+ */
+function rebaselineAtInit() {
+  if (!loaded) return; // nothing used yet: the first read loads the real key
+  const doc = readDoc();
+  storedPresent = doc.present;
+  if (!pendingReset) {
+    stats = mergeStats(doc.stats, stats, synced);
+    synced = structuredClone(doc.stats);
+    epoch = doc.epoch;
+    adoptSavedCollection();
+  }
+  watchStorage();
+  queueMicrotask(() => {
+    notify();
+    checkAchievements();
+    if (dirty || pendingReset || !same(stats, synced)) scheduleSave();
+  });
+}
+onPowerStoreInit(rebaselineAtInit);
 
 /**
  * Unlock achievements the current stats satisfy. Ids already in `storedUnlocked`
@@ -551,6 +609,7 @@ function claimUnlocks(storedUnlocked: Record<string, number>, defer = false, eve
 function flushNow() {
   saveTimer = 0;
   ensureLoaded();
+  if (!keyKnown()) return;
   const stored = readDoc();
   let base = stored.stats;
   let out: PowerStats;
@@ -610,6 +669,7 @@ function flushNow() {
 
 /** Flush under a cross-window lock when possible, else synchronously. */
 function requestFlush(): Promise<void> {
+  if (!keyKnown()) return Promise.resolve(); // init saves whatever is pending
   const locks = typeof navigator !== "undefined" ? navigator.locks : undefined;
   if (!locks) {
     flushNow();
@@ -632,6 +692,7 @@ function requestFlush(): Promise<void> {
 
 function scheduleSave() {
   dirty = true;
+  if (!keyKnown()) return; // init schedules the save once the key is known
   if (!saveTimer) saveTimer = window.setTimeout(() => {
     saveTimer = 0;
     void requestFlush();
@@ -668,6 +729,8 @@ function onStorage(e: StorageEvent) {
 
 function checkAchievements(event: StatsEvent = {}) {
   // Cheap in-memory pre-check: typing must not touch storage unless something unlocks.
+  // Before init, stored unlocks are unknown: wait, so they are not toasted again.
+  if (!keyKnown()) return;
   const ctx = { hour: new Date().getHours(), typed: event.typed === true };
   if (!ACHIEVEMENTS.some((a) => !stats.unlocked[a.id] && a.check(stats, ctx))) return;
   const stored = pendingReset ? { stats: EMPTY_STATS, epoch } : readDoc();
@@ -720,7 +783,7 @@ export function flushPowerStats(): Promise<void> {
  * granted, so this reads, merges and writes synchronously without the lock.
  */
 export function flushPowerStatsSync() {
-  if (!loaded) return;
+  if (!loaded || !keyKnown()) return;
   if (saveTimer) window.clearTimeout(saveTimer);
   saveTimer = 0;
   if (dirty || pendingReset || pendingClear) flushNow();

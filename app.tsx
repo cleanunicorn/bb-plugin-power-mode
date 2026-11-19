@@ -8,9 +8,10 @@
 // - The plugin's Settings page has themes, particle/glow sliders, effect
 //   toggles, lifetime stats, and achievements.
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import type { CSSProperties, ReactNode } from "react";
+import type { ComponentType, CSSProperties, ReactNode } from "react";
 import {
   definePluginApp,
+  experimental_usePluginId,
   experimental_useSidebarThreads,
   useBbContext,
   useRealtime,
@@ -63,6 +64,21 @@ import type { rpcContract } from "./server";
 const SETTINGS_CHANGED_CHANNEL = "settings-changed";
 /** Identifies this window's saves so it ignores its own change signals. */
 const CLIENT_ID = Math.random().toString(36).slice(2, 12);
+
+/**
+ * Initialises the store from a UI slot, so storage keys never depend on the
+ * content script mounting first. Runs during render, not in an effect: child
+ * effects (AchievementObserver records on mount) run before a parent's.
+ * `initPowerStore` is idempotent and defers subscriber notifications.
+ */
+function withPowerStore<P extends object>(Component: ComponentType<P>): ComponentType<P> {
+  function PowerStoreScope(props: P) {
+    initPowerStore(experimental_usePluginId());
+    return <Component {...props} />;
+  }
+  PowerStoreScope.displayName = `withPowerStore(${Component.displayName ?? Component.name})`;
+  return PowerStoreScope;
+}
 
 function usePowerSettings(): PowerSettings {
   return useSyncExternalStore(subscribePowerSettings, getPowerSettings);
@@ -882,21 +898,21 @@ export default definePluginApp((app) => {
 
   app.slots.experimental_appOverlay({
     id: "settings-sync",
-    component: SettingsSyncer,
+    component: withPowerStore(SettingsSyncer),
   });
   app.slots.experimental_appOverlay({
     id: "agent-watcher",
-    component: AgentWatcher,
+    component: withPowerStore(AgentWatcher),
   });
   app.slots.experimental_appOverlay({
     id: "achievement-observer",
-    component: AchievementObserver,
+    component: withPowerStore(AchievementObserver),
   });
   app.composer.customize({
     id: "achievement-input",
     scopes: ["thread", "new-thread"],
     banners: [
-      { id: "observer", chrome: "bare", component: AchievementComposer },
+      { id: "observer", chrome: "bare", component: withPowerStore(AchievementComposer) },
     ],
   });
   app.slots.navPanel({
@@ -904,13 +920,13 @@ export default definePluginApp((app) => {
     path: "achievements",
     title: "Power Mode achievements",
     icon: "Zap",
-    component: StatsAndAchievements,
+    component: withPowerStore(StatsAndAchievements),
   });
 
   app.slots.settingsSection({
     id: "power",
     title: "Power Mode",
     description: "Particles, shake, combos, and lightning while you type.",
-    component: SettingsSection,
+    component: withPowerStore(SettingsSection),
   });
 });

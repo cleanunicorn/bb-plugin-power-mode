@@ -3,6 +3,7 @@ import { installWindow } from "./window-stub";
 
 async function fresh() {
   vi.resetModules();
+  (await import("../../lib/power-store")).initPowerStore("bb-plugin-power-mode");
   const stats = await import("../../lib/power-stats");
   const presentation = await import("../../lib/achievement-presentation");
   return { ...stats, ...presentation };
