@@ -245,6 +245,38 @@ describe("power-stats", () => {
     expect(loaded.collection.unlocked).toMatchObject({ "mission-control": 40, "hello-copilot": 30, "long-thread": 50 });
   });
 
+  it("stores an empty thread map once both badges unlock and keeps it empty", async () => {
+    const stats = await freshStats();
+    let n = 0;
+    const reply = async (thread: string) => {
+      const ev = { now: ++n, wall: Date.now(), editor: "one", thread, turn: `r${n}`, theme: "neon" as const,
+        quiet: false, silent: false };
+      stats.recordAchievementEvent({ ...ev, type: "start" });
+      stats.recordAchievementEvent({ ...ev, type: "complete", status: "completed", fresh: true, words: 20 });
+      await stats.flushPowerStats();
+      return JSON.parse(win.data.get(STATS_KEY)!).collection;
+    };
+    for (const t of ["thr_a", "thr_b"]) await reply(t);
+    for (let i = 0; i < 9; i++) await reply("thr_c");
+    const stored = await reply("thr_c");
+    expect(stored.unlocked).toHaveProperty("mission-control");
+    expect(stored.unlocked).toHaveProperty("long-thread");
+    expect(stored.threads).toEqual({});
+    for (const t of ["thr_d", "thr_e", "thr_f"]) expect((await reply(t)).threads).toEqual({});
+  });
+  it("rewrites a legacy thread map as empty on the first save when both badges are unlocked", async () => {
+    const threads = Object.fromEntries(Array.from({ length: 30 }, (_, i) => [`thr_${i}`, 2]));
+    win.data.set(STATS_KEY, JSON.stringify({
+      unlocked: { "mission-control": 40, "long-thread": 50 },
+      collection: { version: 1, unlocked: { "mission-control": 40, "long-thread": 50 }, threads },
+    }));
+    const stats = await freshStats();
+    stats.recordStats((s) => ({ ...s, chars: s.chars + 1 }));
+    await stats.flushPowerStats();
+    const saved = JSON.parse(win.data.get(STATS_KEY)!);
+    expect(saved.collection.threads).toEqual({});
+    expect(saved.collection.unlocked).toMatchObject({ "mission-control": 40, "long-thread": 50 });
+  });
   it("preserves reducer activity after repeated flushes and remote adoption", async () => {
     const stats = await freshStats();
     const event = (n: number) => stats.recordAchievementEvent({ type: "edit", now: n, wall: Date.now(),
