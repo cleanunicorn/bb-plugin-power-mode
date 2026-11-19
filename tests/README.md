@@ -69,6 +69,15 @@ that cancel native paste. Pastes count once even when the editor emits
 `insertText`; bulk input leaves typing-speed records unchanged. Terminal input
 and undo/redo stay excluded.
 
+`agent-scroll.browser.js` covers scrolling a chat while an agent runs: history
+prepended above the known rows (with no gesture), a row remounted as a new element
+with the same id, rows mounted above the known tail or before an end spacer, and a
+far jump that replaces every known row all add nothing. A new row after the known
+tail earns first-mount credit. During a wheel window, text streaming into a known
+row still counts while a new tail row only sets a baseline. `scroll` events alone
+do not hold the window open, scroll keys open it unless typed into an editor, and
+a scrollbar drag holds it until the pointer is released.
+
 `thread-switch.browser.js` covers lingering effects after thread navigation (#17):
 twelve timeline swaps with streaming text while the agent starts and stops leave
 no canvas, bloom, vignette or HUD residue once activity ends; a render frame that
