@@ -5,6 +5,7 @@ npm ci
 npm run typecheck     # tsc over the plugin sources
 npm run test:unit     # vitest: lib/power-store, lib/settings-sync, lib/power-stats and the server RPC (tests/unit)
 npm run test:browser  # all tests/*.browser.js fixtures, end to end
+npm run test:browser -- paste-ordnance  # only fixtures whose filename contains a filter
 npm test              # unit + browser
 ```
 
@@ -14,6 +15,15 @@ with esbuild into `dist/test-site` (`npm run build:test`), serves it on
 through BetterWright with a dedicated `power-mode-tests` profile, and stops the server
 afterwards, including on failure and on SIGINT/SIGTERM. It exits non-zero if any
 fixture fails, if port 9146 is taken, or if BetterWright's browser is missing.
+Arguments filter the fixtures by filename substring (any match runs); a filter
+that matches nothing fails the run. The summary prints each fixture's wall-clock
+time and marks it `SLOW` above 22 s.
+
+BetterWright's `run` CLI stops a fixture after a fixed 30 seconds, and neither a
+flag nor an environment variable changes that. Keep each fixture well under the
+limit; when one is marked `SLOW`, split it into several fixtures (each with its
+own copy of the harness, since fixtures cannot import shared code), as was done
+for `paste-ordnance`.
 
 First run on a machine: `npx betterwright setup` downloads the managed Chromium.
 If Chromium aborts with "The SUID sandbox helper binary was found, but is not
@@ -32,9 +42,19 @@ once the site is served.
 - `checks`: typecheck, test-site build and unit tests.
 - `browser`: `betterwright setup` then `npm run test:browser` with
   `--no-sandbox`. BetterWright needs no sign-in, profile or external service, only the
-  download of its managed Chromium. This was verified locally; the workflow itself
-  can only be proven by its first run on GitHub. If it turns out to be blocked there,
-  the `checks` job still runs and the failing `browser` job names the blocker.
+  download of its managed Chromium.
+  - The managed Chromium in `~/.betterwright/chromium` is cached with
+    `actions/cache`, keyed on the runner OS and architecture and on the
+    `betterwright` version locked in `package-lock.json` (the Chromium release is
+    pinned inside that package). Setup still runs on a cache hit: when the cached
+    install receipt matches it logs `BetterChromium already installed` and
+    downloads nothing, and when it does not match it downloads again, so a stale
+    cache heals itself. On a miss the cache is saved right after setup succeeds,
+    even if a fixture fails later.
+  - The GitHub release download sometimes fails (504) or stalls, so setup is
+    retried up to 4 times, each attempt bounded to 180 s, with 15, 30 and 45 s
+    pauses. Downloads are staged and swapped in, so a failed attempt leaves no
+    partial install. The job fails only after the last attempt.
 
 ## Fixtures
 
@@ -52,11 +72,15 @@ positioning and focus without emitting effects or changing scroll position.
 table and lucky-drop limits, milestones crossed by combo jumps, paste-length capture
 in `<textarea>`, `<input>` and contenteditable (paste event, `InputEvent.dataTransfer`,
 drops), the fallback for editors that cancel the native paste, empty and terminal
-pastes, staggered detonations, every theme × tier slam title with clean canvases
-afterwards, skins kept across a mid-flight theme switch, the timer, pending and
+pastes, staggered detonations, skins kept across a mid-flight theme switch, the timer, pending and
 particle caps under ten rapid 300k pastes, the singularity pull, `lightning`,
 `screenShake` and `sound` off, and disabling and re-enabling during an event. It
 uses the `setOrdnanceRandom` and `ordnanceDebug` test seams.
+`paste-ordnance-themes-a.browser.js` (neon, fire, matrix) and
+`paste-ordnance-themes-b.browser.js` (sakura, cyberpunk, retro) sweep every
+theme × tier: its slam title, that it draws, the timer and particle caps, and
+clean canvases with the dim and event lock released afterwards. The sweep was
+split out to keep each fixture well under BetterWright's 30-second limit.
 
 `haptics.browser.js` covers mobile vibration: crossing a combo milestone and
 losing a 25+ streak each vibrate with their pattern, ordinary keystrokes do not,
@@ -180,7 +204,4 @@ cancellation on reset. Native IME event modeling and live host provider delivery
 are distinct verification levels; the latter has not been exercised by this fixture.
 
 In a restricted filesystem, set `BETTERWRIGHT_HOME` to a fresh `/tmp` directory
-and use npm's `--cache /tmp/power-mode-npm-cache` option. The full paste suite can
-exceed the CLI's 30-second script budget. Run that unchanged script through the
-BetterWright Node client's `run(code, { timeout: 120 })` when needed; keep its
-managed browser/network guard and close the client afterward.
+and use npm's `--cache /tmp/power-mode-npm-cache` option.
