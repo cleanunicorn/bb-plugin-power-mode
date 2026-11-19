@@ -1,4 +1,9 @@
-import { ACHIEVEMENTS, getCollection, type PowerStats } from "./power-stats";
+import {
+  ACHIEVEMENTS,
+  getCollection,
+  hiddenUnlockedIds,
+  type PowerStats,
+} from "./power-stats";
 import { progress } from "./achievement-rules";
 export const TITLES = [
   "Rhythm Mage",
@@ -15,9 +20,7 @@ export function availableTitles(stats: PowerStats): string[] {
     count("Human") >= 5 ? TITLES[0] : null,
     count("Agent") >= 5 ? TITLES[1] : null,
     count("Together") >= 3 ? TITLES[2] : null,
-    ACHIEVEMENTS.filter((a) => a.hidden && stats.unlocked[a.id]).length >= 5
-      ? TITLES[3]
-      : null,
+    hiddenUnlockedIds(stats.unlocked).length >= 5 ? TITLES[3] : null,
   ].filter((x): x is (typeof TITLES)[number] => x !== null);
 }
 export function challengeProgress(id: string, stats: PowerStats): string {

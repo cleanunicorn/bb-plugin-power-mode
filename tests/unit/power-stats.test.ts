@@ -276,4 +276,64 @@ describe("power-stats", () => {
     expect(JSON.parse(win.data.get(STATS_KEY)!).chars).toBe(0);
   });
 
+  it("Doomsday Device plus four catalog secrets unlocks Here Be Dragons on the next event, once", async () => {
+    const secrets = ["doomsday", "dont-panic", "no-spoon", "plot-twist", "lucky-seven"];
+    win.data.set(STATS_KEY, JSON.stringify({ unlocked: Object.fromEntries(secrets.map((id) => [id, 1])) }));
+    const stats = await freshStats();
+    const { availableTitles } = await import("../../lib/achievement-presentation");
+    expect(stats.hiddenUnlockedIds(stats.getPowerStats().unlocked).sort()).toEqual([...secrets].sort());
+    const handler = vi.fn();
+    stats.setUnlockHandler(handler);
+    const tick = (now: number) => stats.recordAchievementEvent({ type: "tick", now, wall: Date.now(),
+      theme: "neon", editor: "one", thread: null, quiet: false, silent: false });
+    tick(1);
+    await stats.flushPowerStats();
+    expect(stats.getPowerStats().unlocked["here-dragons"]).toBe(Date.now());
+    expect(JSON.parse(win.data.get(STATS_KEY)!).unlocked["here-dragons"]).toBe(Date.now());
+    expect(availableTitles(stats.getPowerStats())).toContain("Secret Cartographer");
+    expect(handler.mock.calls.map(([a]) => a.id)).toEqual(["here-dragons"]);
+    tick(2);
+    await stats.flushPowerStats();
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  it("re-checks Here Be Dragons when Doomsday Device unlocks from stats", async () => {
+    // Bombardier (paste tier 5) is already earned, so only the hidden badges are new.
+    const unlocked0 = ["dont-panic", "no-spoon", "plot-twist", "lucky-seven", "bombardier"];
+    win.data.set(STATS_KEY, JSON.stringify({ bestPasteTier: 5,
+      unlocked: Object.fromEntries(unlocked0.map((id) => [id, 1])) }));
+    const stats = await freshStats();
+    const handler = vi.fn();
+    stats.setUnlockHandler(handler);
+    const listener = vi.fn();
+    stats.subscribePowerStats(listener);
+    stats.recordStats((s) => ({ ...s, bestPasteTier: 8 }));
+    vi.advanceTimersByTime(2000);
+    const unlocked = stats.getPowerStats().unlocked;
+    expect(unlocked.doomsday).toBeTruthy();
+    expect(unlocked["here-dragons"]).toBeTruthy();
+    expect(stats.getCollection().saved.unlocked["here-dragons"]).toBe(unlocked["here-dragons"]);
+    expect(stats.getCollection().session.discoveries).toEqual(["doomsday", "here-dragons"]);
+    expect(listener).toHaveBeenCalled();
+    expect(handler.mock.calls.map(([a]) => a.id)).toEqual(["doomsday", "here-dragons"]);
+    stats.recordStats((s) => ({ ...s, bestPasteTier: 9 }));
+    vi.advanceTimersByTime(2000);
+    expect(handler).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not toast Here Be Dragons when another window already stored it", async () => {
+    const secrets = ["dont-panic", "no-spoon", "plot-twist", "lucky-seven"];
+    win.data.set(STATS_KEY, JSON.stringify({ unlocked: Object.fromEntries(secrets.map((id) => [id, 1])) }));
+    const stats = await freshStats();
+    const handler = vi.fn();
+    stats.setUnlockHandler(handler);
+    const remote = JSON.parse(win.data.get(STATS_KEY) ?? JSON.stringify({ unlocked: {} }));
+    remote.unlocked = { ...remote.unlocked, ...Object.fromEntries(secrets.map((id) => [id, 1])), doomsday: 5, "here-dragons": 5 };
+    win.data.set(STATS_KEY, JSON.stringify(remote));
+    stats.recordStats((s) => ({ ...s, bestPasteTier: 8 }));
+    vi.advanceTimersByTime(2000);
+    expect(stats.getPowerStats().unlocked["here-dragons"]).toBe(5);
+    expect(handler.mock.calls.map(([a]) => a.id)).toEqual(["bombardier"]);
+  });
+
 });

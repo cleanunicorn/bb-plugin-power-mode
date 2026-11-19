@@ -15,6 +15,7 @@ import {
   RULES,
   createCollection,
   reduceCollection,
+  checkDragons,
   parseCollection,
   type SavedCollection,
   type AchievementEvent,
@@ -347,6 +348,13 @@ export const ACHIEVEMENTS: Achievement[] = [
   })),
   ...CATALOG.map((a) => ({ ...a, check: () => false })),
 ];
+/**
+ * Ids of every unlocked hidden achievement, from both lists. The one definition
+ * of "hidden achievement" shared by Secret Cartographer and Here Be Dragons.
+ */
+export function hiddenUnlockedIds(unlocked: Record<string, number>): string[] {
+  return ACHIEVEMENTS.filter((a) => a.hidden && unlocked[a.id]).map((a) => a.id);
+}
 let collection = createCollection();
 export function getCollection() {
   ensureLoaded();
@@ -364,7 +372,11 @@ export function recordAchievementEvent(event: Omit<AchievementEvent, "seq">) {
   ensureLoaded();
   const beforeWindows = collection.saved.windows;
   const beforeSession = collection.session;
-  const earned = reduceCollection(collection, { ...event, seq: ++eventSeq });
+  const earned = reduceCollection(
+    collection,
+    { ...event, seq: ++eventSeq },
+    hiddenUnlockedIds(stats.unlocked),
+  );
   if (
     event.type === "tick" &&
     !earned.length &&
@@ -673,6 +685,16 @@ function checkAchievements(event: StatsEvent = {}) {
   const stored = pendingReset ? { stats: EMPTY_STATS, epoch } : readDoc();
   const prior = stored.epoch === epoch ? stored.stats.unlocked : {};
   if (claimUnlocks(prior, true, event)) {
+    // A stats-driven hidden unlock (Doomsday Device) can complete Here Be Dragons.
+    const dragons = checkDragons(collection, Date.now(), hiddenUnlockedIds(stats.unlocked));
+    if (dragons.length) {
+      stats = {
+        ...stats,
+        collection: collection.saved,
+        unlocked: { ...stats.unlocked, ...collection.saved.unlocked },
+      };
+      for (const id of dragons) pendingToasts.push(ACHIEVEMENTS.find((a) => a.id === id)!);
+    }
     notify(); // unlocks show in settings immediately
     void requestFlush();
   }

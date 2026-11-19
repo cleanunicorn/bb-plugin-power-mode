@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   createCollection,
   reduceCollection,
+  checkDragons,
   CATALOG,
   parseCollection,
   progress,
@@ -364,6 +365,44 @@ test("hour boundary uses wall time but rejects clock jumps; five discoveries unl
   });
   assert.deepEqual(x.send("tick"), ["here-dragons"]);
   assert.deepEqual(x.send("tick"), []);
+});
+test("Dragons counts hidden badges unlocked outside the catalog, without double counting", () => {
+  const secrets = ["dont-panic", "no-spoon", "plot-twist", "lucky-seven"];
+  const tick = (s, seq, extraHidden) =>
+    reduceCollection(
+      s,
+      { ...base, seq, type: "tick" },
+      extraHidden,
+    );
+  const s = createCollection({
+    unlocked: Object.fromEntries(secrets.map((id) => [id, 1])),
+  });
+  assert.deepEqual(tick(s, 1), []);
+  assert.deepEqual(tick(s, 2, ["doomsday"]), ["here-dragons"]);
+  assert.deepEqual(s.session.discoveries, ["here-dragons"]);
+  assert.deepEqual(tick(s, 3, ["doomsday"]), []);
+  // Catalog ids repeated in extraHidden, and Dragons itself, count once or not at all.
+  const three = createCollection({
+    unlocked: Object.fromEntries(secrets.slice(0, 3).map((id) => [id, 1])),
+  });
+  assert.deepEqual(
+    tick(three, 1, [...secrets.slice(0, 3), "here-dragons", "dont-panic"]),
+    [],
+  );
+  assert.deepEqual(tick(three, 2, ["doomsday"]), []);
+  assert.equal(Object.hasOwn(three.saved.unlocked, "here-dragons"), false);
+});
+test("checkDragons awards with the given wall time and reports nothing when already earned", () => {
+  const s = createCollection({
+    unlocked: Object.fromEntries(
+      ["dont-panic", "no-spoon", "plot-twist", "lucky-seven"].map((id) => [id, 1]),
+    ),
+  });
+  assert.deepEqual(checkDragons(s, 1234), []);
+  assert.deepEqual(checkDragons(s, 1234, ["doomsday"]), ["here-dragons"]);
+  assert.equal(s.saved.unlocked["here-dragons"], 1234);
+  assert.deepEqual(checkDragons(s, 5678, ["doomsday"]), []);
+  assert.equal(s.saved.unlocked["here-dragons"], 1234);
 });
 test("near misses cannot earn full-reply, weave, themed, or timing rewards", () => {
   const h = harness();
