@@ -2479,10 +2479,12 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
   };
   window.addEventListener("pointerup", endDrag, gesture);
   window.addEventListener("pointercancel", endDrag, gesture);
+  // Releasing outside the window may never deliver `pointerup`.
+  window.addEventListener("pointermove", (e) => { if (e.buttons === 0) endDrag(); }, gesture);
 
-  /** The last on-screen row that already has a baseline. */
-  function knownTail(): Element | null {
-    const rows = document.querySelectorAll("[data-timeline-items] [data-timeline-row-id]");
+  /** The last on-screen row in `list` that already has a baseline. */
+  function knownTail(list: Element): Element | null {
+    const rows = list.querySelectorAll("[data-timeline-row-id]");
     for (let i = rows.length - 1; i >= 0; i--) if (rowTexts.has(rowKey(rows[i]))) return rows[i];
     return null;
   }
@@ -2566,8 +2568,13 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
       touched.clear();
       return;
     }
-    // Judge every new row in this flush against the rows known before it.
-    const tail = knownTail();
+    // Judge every new row in this flush against the rows its own list knew
+    // before the flush (bb can show more than one timeline list at once).
+    const tails = new Map<Element, Element | null>();
+    for (const row of touched.keys()) {
+      const list = row.closest("[data-timeline-items]");
+      if (list && row.isConnected && !tails.has(list) && !rowTexts.has(rowKey(row))) tails.set(list, knownTail(list));
+    }
     let totalDelta = 0;
     let wordDelta = 0;
     for (const [row, node] of touched) {
@@ -2577,7 +2584,7 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
       const text = agentRowText(row);
       const known = rowTexts.get(key);
       rowTexts.set(key, text);
-      if (known === undefined && !isNewOutput(row, tail)) continue;
+      if (known === undefined && !isNewOutput(row, tails.get(row.closest("[data-timeline-items]")!) ?? null)) continue;
       const previous = known ?? "";
       const delta = text.length - previous.length;
       wordDelta += wordCount(text) - wordCount(previous);

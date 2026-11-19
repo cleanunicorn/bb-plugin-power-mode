@@ -163,6 +163,21 @@ const result = await page.evaluate(async () => {
   await tick();
   assert(chars() === before + 'After release'.length, `Credit resumes after the drag (${chars() - before})`);
 
+  // 10. Each timeline list has its own tail: a second list later in the page
+  // (a side chat) neither hides new replies here nor credits its own history.
+  await begin();
+  const side = document.createElement('div');
+  side.dataset.timelineItems = '';
+  document.body.append(side);
+  before = chars();
+  side.append(makeRow('s0', `Side chat history ${words(30)}`));
+  await tick();
+  assert(chars() === before, `Side list history counted (${chars() - before})`);
+  items.append(makeRow('main-reply', 'Main reply'));
+  await tick();
+  assert(chars() === before + 'Main reply'.length, `A later list must not hide new replies (${chars() - before})`);
+  side.remove(); await tick();
+
   T.syncAgentThreads(thread(false), 'a'); await tick(30);
   return { ok: true };
 });
