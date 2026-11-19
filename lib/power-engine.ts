@@ -6,6 +6,9 @@
 // Agent Power Mode: while an agent is running (reported by the app overlay
 // through `syncAgentThreads`), a MutationObserver watches the transcript
 // (`[data-timeline-items]`) for text growth and sparks at the newest text.
+// Rows are tracked by `data-timeline-row-id`; a row that mounts without a
+// baseline only counts when it lands after every known row and outside a user
+// scroll gesture, so scrolling through history never counts as output.
 //
 // Rendering: a 1× particle canvas plus a quarter-resolution bloom canvas the
 // browser upscales (bilinear) for a soft, strong glow at ~1/16 the fill cost.
@@ -34,6 +37,10 @@ const COMBO_TIMEOUT_MS = 3000;
 const AGENT_TIMEOUT_MS = 4000;
 /** Rows that appear this soon after the visible thread changes are the swapped-in transcript, not new output. */
 const AGENT_SETTLE_MS = 300;
+// A scroll gesture (wheel, touch, scroll key) keeps rows that mount in this
+// window from counting as agent output; bb mounts rows as the chat scrolls.
+const USER_SCROLL_MS = 500;
+const SCROLL_KEYS = new Set(["End", "PageDown", " ", "ArrowDown", "Home", "PageUp", "ArrowUp"]);
 /** Live particle cap at density 1×; scales with the Particles slider. */
 const BASE_MAX_PARTICLES = 450;
 const MAX_GLYPHS = 60;
@@ -2407,7 +2414,11 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
 
   // ---- agent output
 
-  const rowTexts = new WeakMap<Element, string>();
+  // Baseline text per timeline row, keyed by row id: bb remounts rows as new
+  // elements (virtualization, paging older history), and a remount must not
+  // look like the agent writing the whole row again.
+  const rowTexts = new Map<string, string>();
+  const rowKey = (row: Element) => row.getAttribute("data-timeline-row-id") ?? "";
   const wordCount = (text: string) => (text.match(/\S+/gu) ?? []).length;
   // BB's command approval preview renders only the first four lines while
   // collapsed. Count that stable prefix in either state; its remaining lines
@@ -2437,6 +2448,59 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
   const touched = new Map<HTMLElement, Node>();
   let agentFlushTimer = 0;
   let observing = false;
+
+  // User scroll gestures. Only gestures open the window: bb's auto-follow
+  // fires `scroll` events all through a stream, so those are ignored.
+  let userScrollUntil = 0;
+  let scrollbarDrag = false;
+  const markUserScroll = () => { userScrollUntil = performance.now() + USER_SCROLL_MS; };
+  const userScrolling = () => scrollbarDrag || performance.now() < userScrollUntil;
+  const gesture = { capture: true, passive: true, signal } as const;
+  window.addEventListener("wheel", markUserScroll, gesture);
+  window.addEventListener("touchmove", markUserScroll, gesture);
+  window.addEventListener("keydown", (e) => {
+    const target = e.target instanceof Element ? e.target : null;
+    if (!SCROLL_KEYS.has(e.key) || target?.closest('[contenteditable]:not([contenteditable="false"]),textarea,input,select')) return;
+    markUserScroll();
+  }, gesture);
+  // A press on the scroll container itself (not on a row) is a scrollbar drag.
+  window.addEventListener("pointerdown", (e) => {
+    const target = e.target instanceof Element ? e.target : null;
+    if (!target || target.closest("[data-timeline-items]") || !target.querySelector("[data-timeline-items]")) return;
+    const overflow = getComputedStyle(target).overflowY;
+    if (overflow !== "auto" && overflow !== "scroll") return;
+    scrollbarDrag = true;
+    markUserScroll();
+  }, gesture);
+  const endDrag = () => {
+    if (!scrollbarDrag) return;
+    scrollbarDrag = false;
+    markUserScroll();
+  };
+  window.addEventListener("pointerup", endDrag, gesture);
+  window.addEventListener("pointercancel", endDrag, gesture);
+
+  /** The last on-screen row that already has a baseline. */
+  function knownTail(): Element | null {
+    const rows = document.querySelectorAll("[data-timeline-items] [data-timeline-row-id]");
+    for (let i = rows.length - 1; i >= 0; i--) if (rowTexts.has(rowKey(rows[i]))) return rows[i];
+    return null;
+  }
+
+  /**
+   * Whether a row without a baseline is new agent output rather than history
+   * the chat mounted while scrolling. New output lands after every known row,
+   * at the end of the transcript, and not during a scroll gesture.
+   */
+  function isNewOutput(row: Element, tail: Element | null): boolean {
+    if (!tail || userScrolling()) return false;
+    if (tail.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_PRECEDING) return false;
+    // bb renders an end spacer only while rows remain below the window.
+    for (let el = row.nextElementSibling; el; el = el.nextElementSibling) {
+      if (el.matches("[data-timeline-window-spacer]")) return false;
+    }
+    return true;
+  }
 
   function collectAgentMutations(records: MutationRecord[]) {
     for (const r of records) {
@@ -2498,16 +2562,23 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
       if (!turn) agentTurns.set(creditId, (turn = { words: 0, milestone: 0, partial: true }));
     }
     if (!turn) {
-      for (const row of touched.keys()) rowTexts.set(row, agentRowText(row));
+      for (const row of touched.keys()) if (row.isConnected) rowTexts.set(rowKey(row), agentRowText(row));
       touched.clear();
       return;
     }
+    // Judge every new row in this flush against the rows known before it.
+    const tail = knownTail();
     let totalDelta = 0;
     let wordDelta = 0;
     for (const [row, node] of touched) {
+      // A detached row must not overwrite the baseline of its remounted twin.
+      if (!row.isConnected) continue;
+      const key = rowKey(row);
       const text = agentRowText(row);
-      const previous = rowTexts.get(row) ?? "";
-      rowTexts.set(row, text);
+      const known = rowTexts.get(key);
+      rowTexts.set(key, text);
+      if (known === undefined && !isNewOutput(row, tail)) continue;
+      const previous = known ?? "";
       const delta = text.length - previous.length;
       wordDelta += wordCount(text) - wordCount(previous);
       if (delta <= 0) continue;
@@ -2565,7 +2636,7 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
     observing = want;
     if (want) {
       document.querySelectorAll("[data-timeline-items] [data-timeline-row-id]").forEach((row) => {
-        rowTexts.set(row, agentRowText(row));
+        rowTexts.set(rowKey(row), agentRowText(row));
       });
       observer.observe(document.body, { subtree: true, childList: true, characterData: true });
     } else {
@@ -2575,6 +2646,7 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
       if (agentFlushTimer) window.clearTimeout(agentFlushTimer);
       agentFlushTimer = 0;
       if (touched.size) flushAgent();
+      rowTexts.clear();
     }
   }
 
@@ -2636,7 +2708,14 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
       if (!turn) agentTurns.set(id, (turn = { words: 0, milestone: 0, partial: !settings.enabled || !settings.agentMode }));
       if (id !== after) turn.partial = true;
     }
-    if (previousVisibleId !== visibleId) settleUntil = performance.now() + AGENT_SETTLE_MS;
+    if (previousVisibleId !== visibleId) {
+      settleUntil = performance.now() + AGENT_SETTLE_MS;
+      // Forget rows that are gone so long sessions don't keep every reply's
+      // text; a row that remounts during the settle window is re-baselined.
+      const live = new Set<string>();
+      document.querySelectorAll("[data-timeline-items] [data-timeline-row-id]").forEach((row) => live.add(rowKey(row)));
+      for (const key of [...rowTexts.keys()]) if (!live.has(key)) rowTexts.delete(key);
+    }
     if (after !== before || previousVisibleId !== visibleId) {
       // The transcript on screen is being swapped: ignore it while it settles
       // and let the HUD follow the new thread's own counter.
