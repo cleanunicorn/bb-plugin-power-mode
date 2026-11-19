@@ -16,6 +16,7 @@ import {
   createCollection,
   reduceCollection,
   parseCollection,
+  pruneThreads,
   type SavedCollection,
   type AchievementEvent,
   type Category,
@@ -312,11 +313,18 @@ export function mergeStats(stored: PowerStats, local: PowerStats, synced: PowerS
   for (const k of ["windows", "revisions", "replies", "landings"] as const)
     saved[k] = a[k] + Math.max(0, b[k] - c[k]);
   saved.best = Math.max(a.best, b.best);
-  for (const k of ["biomes", "threads"] as const) {
-    saved[k] = { ...a[k] };
-    for (const [id, count] of Object.entries(b[k]))
-      saved[k][id] = Math.min(k === "biomes" ? RULES.biome : RULES.longThread,
-        (a[k][id] ?? 0) + Math.max(0, count - (c[k][id] ?? 0)));
+  saved.biomes = { ...a.biomes };
+  for (const [id, count] of Object.entries(b.biomes))
+    saved.biomes[id] = Math.min(RULES.biome, (a.biomes[id] ?? 0) + Math.max(0, count - (c.biomes[id] ?? 0)));
+  // Thread keys are ordered by recency: only threads with new replies move to
+  // the end, and threads with no new replies are never re-added.
+  saved.threads = { ...a.threads };
+  for (const [id, count] of Object.entries(b.threads)) {
+    const delta = count - (c.threads[id] ?? 0);
+    if (delta <= 0) continue;
+    const next = Math.min(RULES.longThread, (a.threads[id] ?? 0) + delta);
+    delete saved.threads[id];
+    saved.threads[id] = next;
   }
   for (const k of ["lanterns", "jackets"] as const)
     saved[k] = THEME_IDS.filter(t => a[k].includes(t) || b[k].includes(t));
@@ -324,6 +332,7 @@ export function mergeStats(stored: PowerStats, local: PowerStats, synced: PowerS
     saved[k] = b[k] !== c[k] ? b[k] : a[k];
   for (const id of Object.keys(unlocked))
     if (CATALOG.some(a => a.id === id)) saved.unlocked[id] = unlocked[id];
+  saved.threads = pruneThreads(saved.threads, saved.unlocked);
   out.collection = saved;
   return out;
 }
@@ -516,6 +525,7 @@ function ensureLoaded() {
   for (const a of CATALOG)
     if (stats.unlocked[a.id])
       collection.saved.unlocked[a.id] = stats.unlocked[a.id];
+  collection.saved.threads = pruneThreads(collection.saved.threads, collection.saved.unlocked);
   stats = {
     ...stats,
     collection: collection.saved,

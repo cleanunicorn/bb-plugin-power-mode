@@ -198,6 +198,52 @@ describe("power-stats", () => {
     expect(base.collection.replies).toBe(2);
     expect(mergeStats(merged, merged, merged)).toEqual(merged);
   });
+  it("does not bring back a cleared thread map from a stale window", async () => {
+    const { mergeStats, EMPTY_STATS } = await freshStats();
+    const base = structuredClone(EMPTY_STATS);
+    base.collection.threads = { a: 3, b: 2, c: 1 };
+    const local = structuredClone(base), stored = structuredClone(base);
+    stored.collection.threads = {};
+    stored.collection.unlocked = { "mission-control": 1, "long-thread": 2 };
+    expect(mergeStats(stored, local, base).collection.threads).toEqual({});
+    // The local window unlocks the second badge: the union clears the map too.
+    const half = structuredClone(base);
+    half.collection.unlocked = { "mission-control": 1 };
+    const done = structuredClone(half);
+    done.unlocked["long-thread"] = done.collection.unlocked["long-thread"] = 5;
+    done.collection.threads.a = 10;
+    expect(mergeStats(half, done, half).collection.threads).toEqual({});
+  });
+  it("caps the merged thread map in recency order when two windows overflow it", async () => {
+    const { mergeStats, EMPTY_STATS } = await freshStats();
+    const ids = (n: number, from: number) => Array.from({ length: n }, (_, i) => `t${i + from}`);
+    const ones = (keys: string[]) => Object.fromEntries(keys.map((k) => [k, 1]));
+    const base = structuredClone(EMPTY_STATS);
+    base.collection.unlocked = { "mission-control": 1 };
+    const stored = structuredClone(base), local = structuredClone(base);
+    stored.collection.threads = { ...ones(ids(9, 1)), t1: 4 };
+    local.collection.threads = ones(ids(8, 10));
+    const merged = mergeStats(stored, local, base).collection.threads;
+    expect(Object.keys(merged)).toEqual(["t1", ...ids(15, 3)]);
+    expect(merged.t1).toBe(4);
+    // A thread with new replies moves to the end; unchanged ones stay put.
+    const again = structuredClone(base);
+    again.collection.threads = { ...merged };
+    const next = structuredClone(again);
+    next.collection.threads.t3 = 2;
+    expect(Object.keys(mergeStats(again, next, again).collection.threads)).toEqual(["t1", ...ids(14, 4), "t3"]);
+  });
+  it("loads with an empty thread map when both badges are unlocked, keeping every unlock", async () => {
+    const threads = Object.fromEntries(Array.from({ length: 30 }, (_, i) => [`thr_${i}`, 2]));
+    win.data.set(STATS_KEY, JSON.stringify({
+      unlocked: { "long-thread": 50 },
+      collection: { version: 1, unlocked: { "mission-control": 40, "hello-copilot": 30 }, threads },
+    }));
+    const stats = await freshStats();
+    const loaded = stats.getPowerStats();
+    expect(loaded.collection.threads).toEqual({});
+    expect(loaded.collection.unlocked).toMatchObject({ "mission-control": 40, "hello-copilot": 30, "long-thread": 50 });
+  });
 
   it("preserves reducer activity after repeated flushes and remote adoption", async () => {
     const stats = await freshStats();
