@@ -15,7 +15,9 @@
 
 import {
   applyRemotePowerSettings,
+  clearUnsyncedLocalChanges,
   getPowerSettings,
+  getUnsyncedLocalChanges,
   powerStoreReady,
   subscribeLocalSettingsChanges,
   type PowerSettings,
@@ -50,11 +52,15 @@ export function startSettingsSync(remote: SettingsRemote, options: SettingsSyncO
   /** A local change not yet uploaded. */
   let dirty = false;
   /** Fields changed in this window before the first load succeeded. */
-  const changedBeforeHydration = new Set<keyof PowerSettings>();
+  // Changes made before this sync started (a toggle before any slot mounted,
+  // or before an earlier sync hydrated) count as changed before hydration.
+  const unsynced = getUnsyncedLocalChanges();
+  const changedBeforeHydration = new Set<keyof PowerSettings>(unsynced);
   let saving = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let failures = 0;
   let refreshQueued = false;
+  if (unsynced.length) dirty = true;
 
   const backoff = () => Math.min(maxRetryMs, retryMs * 2 ** Math.max(0, failures - 1));
   const busy = () => dirty || saving || timer !== null;
@@ -130,6 +136,7 @@ export function startSettingsSync(remote: SettingsRemote, options: SettingsSyncO
     } else {
       applyRemotePowerSettings(saved);
     }
+    clearUnsyncedLocalChanges(unsynced);
     changedBeforeHydration.clear();
     settleHydration();
   }

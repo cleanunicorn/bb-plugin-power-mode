@@ -7,3 +7,4 @@ export const useBbNavigate = () => ({ toPluginPanel: () => {} });
 export const experimental_Icon = () => null;
 export const useRpc = () => ({ call: async () => ({ settings: null }) });
 export const useRealtime = () => {};
+export const experimental_usePluginId = () => "achievement-fixture";

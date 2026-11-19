@@ -3,6 +3,15 @@
 // every window in a browser profile, keyed by the plugin id, synced across open
 // windows through the `storage` event) so effects start instantly; the saved
 // copy lives on the bb server and is kept in step by lib/settings-sync.ts.
+//
+// The storage keys depend on the plugin id, which `initPowerStore` sets. Every
+// entry point calls it: the content script with its mount context, and each UI
+// slot during render (see `withPowerStore` in app.tsx), so the host's mount
+// order does not matter. Until then the store is memory-only: reads return
+// defaults, `updatePowerSettings` changes memory and queues the patch, and
+// nothing is written. Init loads the stored copy, applies queued patches over
+// it, writes the result, runs `onPowerStoreInit` callbacks synchronously and
+// notifies subscribers in a microtask (init can run during a React render).
 
 import { DEFAULT_SETTINGS, sameSettings, sanitizeSettings, type PowerSettings } from "./power-settings";
 
@@ -20,8 +29,17 @@ let storageKey = "bb-plugin-power-mode:settings";
 let keyPrefix = "bb-plugin-power-mode";
 let state: PowerSettings = DEFAULT_SETTINGS;
 let initialized = false;
+/** Changes made before init, applied over the stored copy once it is known. */
+let pendingPatch: Partial<PowerSettings> | null = null;
+/**
+ * Fields changed in this window while no server sync was listening (before
+ * init, or before the sync started). The sync seeds its pre-hydration changes
+ * from these and clears them once the server copy is reconciled.
+ */
+const unsyncedKeys = new Set<keyof PowerSettings>();
 const listeners = new Set<() => void>();
 const localChangeListeners = new Set<(keys: (keyof PowerSettings)[]) => void>();
+const initCallbacks = new Set<() => void>();
 let resolveReady: () => void = () => {};
 /** Resolves once `initPowerStore` has loaded the local copy. */
 export const powerStoreReady: Promise<void> = new Promise((resolve) => {
@@ -38,6 +56,7 @@ function parse(raw: string | null): PowerSettings {
 }
 
 function writeLocal() {
+  if (!initialized) return; // the key is not known yet
   try {
     window.localStorage.setItem(storageKey, JSON.stringify(state));
   } catch {
@@ -49,18 +68,49 @@ function emit() {
   for (const listener of listeners) listener();
 }
 
-/** Idempotent; the first caller decides the storage key. */
+/**
+ * Idempotent; the first caller decides the storage keys. Safe to call during a
+ * React render: storage is loaded synchronously, subscribers hear about it in
+ * a microtask.
+ */
 export function initPowerStore(pluginId: string) {
   if (initialized) return;
   initialized = true;
   keyPrefix = pluginId;
   storageKey = `${pluginId}:power-mode:settings`;
+  const seen = state;
+  let loaded: PowerSettings;
   try {
-    state = parse(window.localStorage.getItem(storageKey));
+    loaded = parse(window.localStorage.getItem(storageKey));
   } catch {
-    state = DEFAULT_SETTINGS;
+    loaded = DEFAULT_SETTINGS;
   }
+  if (pendingPatch) {
+    state = { ...loaded, ...pendingPatch };
+    pendingPatch = null;
+    writeLocal();
+  } else {
+    state = loaded;
+  }
+  for (const callback of [...initCallbacks]) callback();
+  if (!sameSettings(seen, state)) queueMicrotask(emit);
   resolveReady();
+}
+
+export function isPowerStoreInitialized(): boolean {
+  return initialized;
+}
+
+/**
+ * Runs `callback` synchronously inside `initPowerStore`, once the storage keys
+ * are known. Does nothing if the store is already initialised.
+ */
+export function onPowerStoreInit(callback: () => void) {
+  if (initialized) return () => {};
+  initCallbacks.add(callback);
+  return () => {
+    initCallbacks.delete(callback);
+  };
 }
 
 /** Keeps every tab/window in sync. Returns a disposer. */
@@ -118,13 +168,29 @@ export function getPowerSettings(): PowerSettings {
   return state;
 }
 
-/** A change made in this window: persisted locally and announced for the server sync. */
+/**
+ * A change made in this window: persisted locally and announced for the server
+ * sync. Before init it only changes memory and is applied again over the
+ * stored copy when init loads it.
+ */
 export function updatePowerSettings(patch: Partial<PowerSettings>) {
   state = { ...state, ...patch };
+  if (!initialized) pendingPatch = { ...pendingPatch, ...patch };
   writeLocal();
   emit();
   const keys = Object.keys(patch) as (keyof PowerSettings)[];
+  if (localChangeListeners.size === 0) for (const key of keys) unsyncedKeys.add(key);
   for (const listener of localChangeListeners) listener(keys);
+}
+
+/** Fields changed in this window while no server sync was listening. */
+export function getUnsyncedLocalChanges(): (keyof PowerSettings)[] {
+  return [...unsyncedKeys];
+}
+
+/** The server sync reconciled the fields from `getUnsyncedLocalChanges`. */
+export function clearUnsyncedLocalChanges(keys: Iterable<keyof PowerSettings>) {
+  for (const key of keys) unsyncedKeys.delete(key);
 }
 
 /**
