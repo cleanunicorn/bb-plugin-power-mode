@@ -37,5 +37,20 @@ await build({
   logLevel: 'warning',
 });
 await copyFile(join(root, 'tests', 'achievements.html'), join(out, 'achievements.html'));
+// Settings pickers keyboard fixture (#48).
+await build({
+  absWorkingDir: root,
+  entryPoints: ['tests/settings-pickers-entry.tsx'],
+  bundle: true,
+  format: 'iife',
+  globalName: 'PickersTest',
+  alias: {
+    sonner: './tests/toast-stub.ts',
+    '@get-bb/plugin-sdk/app': './tests/achievement-sdk-stub.ts',
+  },
+  outfile: join(out, 'settings-pickers.js'),
+  logLevel: 'warning',
+});
+await copyFile(join(root, 'tests', 'settings-pickers.html'), join(out, 'settings-pickers.html'));
 if (existsSync(join(root, 'dist', 'app.css'))) await copyFile(join(root, 'dist', 'app.css'), join(out, 'app.css'));
 console.log(`Built test site in ${out}`);
