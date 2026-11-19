@@ -3,7 +3,7 @@
 ```sh
 npm ci
 npm run typecheck     # tsc over the plugin sources
-npm run test:unit     # vitest: lib/power-store, lib/settings-sync, lib/power-stats and the server RPC (tests/unit)
+npm run test:unit     # vitest: lib/power-store, lib/settings-sync, lib/power-stats, lib/radio-group and the server RPC (tests/unit)
 npm run test:browser  # all tests/*.browser.js fixtures, end to end
 npm test              # unit + browser
 ```
@@ -68,6 +68,17 @@ drop, null-data OS insertions, bulk text/replacement events and rich editors
 that cancel native paste. Pastes count once even when the editor emits
 `insertText`; bulk input leaves typing-speed records unchanged. Terminal input
 and undo/redo stay excluded.
+
+`settings-pickers.browser.js` covers the Intensity and Theme pickers as radio
+groups (#48). It mounts `SettingsPickers` from `app.tsx` between a "Before" and an
+"After" button and checks that Tab and Shift+Tab stop once per group, on the selected
+option; that arrows (Shift allowed), Home and End move focus and selection together,
+wrap at both ends, update the settings store and never scroll the page; that
+Alt/Ctrl/Meta+arrows are ignored; that each group leaves the other alone; that
+clicking still selects; and that arrows continue from the focused option after a
+remote settings change. Role queries (`radiogroup` by name, `radio` by name and
+checked state) stand in for the screen-reader check; a manual VoiceOver/NVDA pass
+is still pending.
 
 `thread-switch.browser.js` covers lingering effects after thread navigation (#17):
 twelve timeline swaps with streaming text while the agent starts and stops leave

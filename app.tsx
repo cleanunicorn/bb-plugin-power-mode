@@ -18,6 +18,7 @@ import {
 } from "@get-bb/plugin-sdk/app";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { RadioCardGroup } from "@/components/radio-card-group";
 import { cn } from "@/lib/utils";
 import {
   mountPowerEngine,
@@ -228,6 +229,72 @@ function ReduceMotion({ settings }: { settings: PowerSettings }) {
   );
 }
 
+/** The Intensity and Theme pickers; exported for the keyboard fixture (#48). */
+export function SettingsPickers() {
+  const settings = usePowerSettings();
+  return (
+    <>
+      <div>
+        <div className="mb-2 text-sm font-medium">Intensity</div>
+        <RadioCardGroup
+          label="Intensity"
+          className="grid grid-cols-3 gap-2"
+          value={settings.intensity}
+          onChange={(intensity) => updatePowerSettings({ intensity })}
+          options={INTENSITY_OPTIONS.map((option) => ({
+            id: option.id,
+            content: (
+              <>
+                <div className="text-sm font-semibold">{option.label}</div>
+                <div className="mt-0.5 text-xs text-muted-foreground">
+                  {option.hint}
+                </div>
+              </>
+            ),
+          }))}
+        />
+      </div>
+
+      <div>
+        <div className="mb-2 text-sm font-medium">Theme</div>
+        <RadioCardGroup
+          label="Theme"
+          className="grid grid-cols-2 gap-2 sm:grid-cols-3"
+          value={settings.theme}
+          onChange={(theme) => updatePowerSettings({ theme })}
+          options={THEME_IDS.map((id) => {
+            const theme = THEMES[id];
+            return {
+              id,
+              content: (
+                <>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-sm font-semibold">
+                      {theme.emoji} {theme.name}
+                    </span>
+                    <span className="flex" aria-hidden>
+                      {theme.swatch.map((color) => (
+                        <span
+                          key={color}
+                          className="-ml-1 size-3 rounded-full ring-1 ring-background"
+                          style={{ background: color }}
+                        />
+                      ))}
+                    </span>
+                  </div>
+                  <div className="mt-1 text-xs text-muted-foreground">
+                    {theme.description}
+                  </div>
+                </>
+              ),
+            };
+          })}
+        />
+      </div>
+    </>
+  );
+}
+
 function SettingsSection() {
   const settings = usePowerSettings();
   return (
@@ -251,82 +318,7 @@ function SettingsSection() {
         </Button>
       </div>
 
-      <div>
-        <div className="mb-2 text-sm font-medium">Intensity</div>
-        <div
-          className="grid grid-cols-3 gap-2"
-          role="radiogroup"
-          aria-label="Intensity"
-        >
-          {INTENSITY_OPTIONS.map((option) => (
-            <button
-              key={option.id}
-              type="button"
-              role="radio"
-              aria-checked={settings.intensity === option.id}
-              onClick={() => updatePowerSettings({ intensity: option.id })}
-              className={cn(
-                "rounded-lg border p-3 text-left transition-colors",
-                settings.intensity === option.id
-                  ? "border-foreground bg-state-active"
-                  : "border-border hover:bg-state-hover",
-              )}
-            >
-              <div className="text-sm font-semibold">{option.label}</div>
-              <div className="mt-0.5 text-xs text-muted-foreground">
-                {option.hint}
-              </div>
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div>
-        <div className="mb-2 text-sm font-medium">Theme</div>
-        <div
-          className="grid grid-cols-2 gap-2 sm:grid-cols-3"
-          role="radiogroup"
-          aria-label="Theme"
-        >
-          {THEME_IDS.map((id) => {
-            const theme = THEMES[id];
-            const selected = settings.theme === id;
-            return (
-              <button
-                key={id}
-                type="button"
-                role="radio"
-                aria-checked={selected}
-                onClick={() => updatePowerSettings({ theme: id })}
-                className={cn(
-                  "rounded-lg border p-3 text-left transition-colors",
-                  selected
-                    ? "border-foreground bg-state-active"
-                    : "border-border hover:bg-state-hover",
-                )}
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-sm font-semibold">
-                    {theme.emoji} {theme.name}
-                  </span>
-                  <span className="flex" aria-hidden>
-                    {theme.swatch.map((color) => (
-                      <span
-                        key={color}
-                        className="-ml-1 size-3 rounded-full ring-1 ring-background"
-                        style={{ background: color }}
-                      />
-                    ))}
-                  </span>
-                </div>
-                <div className="mt-1 text-xs text-muted-foreground">
-                  {theme.description}
-                </div>
-              </button>
-            );
-          })}
-        </div>
-      </div>
+      <SettingsPickers />
 
       <div className="grid gap-4 sm:grid-cols-2">
         <Slider
