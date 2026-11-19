@@ -29,6 +29,19 @@ Pasting (or dropping) text drops weapons near the caret. Bigger pastes drop bigg
 - Combo records and achievements count at most +10 per paste, so a single huge paste can't unlock them.
 - Editors that cancel the native paste and insert the text themselves (ProseMirror-style) are detected from the `paste` event.
 
+## Agent output
+
+While a thread runs, Power Mode counts the text the agent adds to the visible
+transcript. Rows are tracked by their timeline row id, so a row that bb
+remounts while you scroll (virtualized rows, older history paging in) keeps its
+earlier count and adds nothing. A row Power Mode has not seen before only counts
+when it appears after every row it already knows, with no rows left below the
+visible window, and outside a scroll gesture (wheel, touch, scroll keys or a
+scrollbar drag, plus half a second after). Otherwise its text becomes a
+baseline, and only what the agent writes into it afterwards counts. Text
+streaming into a known row always counts, even while you scroll. The first row
+of an empty transcript is a baseline too, so its first chunk is not counted.
+
 ## Discoveries and personal progress
 
 New speed challenges measure sustained 30-second direct-input windows, rather than

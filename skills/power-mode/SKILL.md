@@ -14,6 +14,8 @@ Power Mode is a frontend-only plugin. It has no CLI commands or agent tools.
   editor/screen shake, flying letters, lightning, Agent Power Mode, sound, plus
   lifetime stats and achievements.
 - **Agent Power Mode** watches the transcript only while some thread is running.
+  It counts only new agent text: scrolling, history paging and virtualized rows
+  remounting never raise the counter (see `docs/power-mode-reference.md`).
 - Settings are saved on the bb server (plugin KV, key `settings`) and follow the user
   to every browser and device on that server; each browser keeps a localStorage copy
   for instant start. Read them with `bb plugin rpc call <plugin id> settings.get`.
