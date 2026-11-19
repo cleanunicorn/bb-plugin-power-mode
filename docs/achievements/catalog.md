@@ -73,8 +73,10 @@ cursor on reconnect/reload prevents history replay without such a log.
 Human/Agent/Together filters and unlocked-only views retain anonymous secret
 cards. Visible progress is formatted centrally by `challengeProgress`. One
 visible challenge can be pinned; sustained speed pins include a static PB ghost.
-Visible legacy badges count toward category titles; hidden badges count only
-toward Secret Cartographer. Equipped titles have no gameplay effect. The session
+Visible legacy badges count toward category titles. Hidden badges from both
+lists, Doomsday Device included, count toward Secret Cartographer (five hidden
+badges) and Here Be Dragons (five hidden badges other than itself); both use
+`hiddenUnlockedIds`. Equipped titles have no gameplay effect. The session
 postcard remains in Settings and the gallery; it never interrupts writing.
 
 One 150-ms coalescing timer emits one toast with count and a gallery action.
