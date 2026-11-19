@@ -37,6 +37,11 @@ without requiring fast typing. Pasted, repeated and unknown-provenance input doe
 not establish physical typing speed; committed IME input can count toward
 non-speed challenges. New input challenges observe supported BB composers.
 
+IME composition (Japanese, Chinese, Korean and other composed input) counts once,
+when it is committed: the committed characters add to characters typed and burst
+WPM. Updates while composing still drive the particles and the combo, one bump
+per update, and flying letters show only the newly added characters.
+
 Agent badges record complete replies observed while their thread is visible,
 with an observed start and successful completion—not correctness or solved tasks.
 Together badges follow composer input, accepted submission and a subsequent

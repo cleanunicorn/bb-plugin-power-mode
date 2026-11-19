@@ -69,6 +69,18 @@ that cancel native paste. Pastes count once even when the editor emits
 `insertText`; bulk input leaves typing-speed records unchanged. Terminal input
 and undo/redo stay excluded.
 
+`ime-composition.browser.js` replays a composition (`compositionstart`,
+`insertCompositionText` updates for `nihongo`, `compositionend`) in the Chrome,
+Firefox (trailing input after `compositionend`) and Safari
+(`deleteCompositionText` and `insertFromComposition` before it) event orders on
+the `<textarea>` and the contenteditable. Updates add no characters, deletes or
+WPM; the commit adds exactly 4; the combo rises once per update in every order.
+It also covers a cancelled composition, composing over a selection, flying
+letters for the new character only (through the `ordnanceDebug().glyphs` seam),
+burst and best WPM from commits only, and unchanged plain typing, paste and
+deletion. Synthetic events cannot drive an OS IME, so real IMEs still need a
+manual check.
+
 `thread-switch.browser.js` covers lingering effects after thread navigation (#17):
 twelve timeline swaps with streaming text while the agent starts and stops leave
 no canvas, bloom, vignette or HUD residue once activity ends; a render frame that
