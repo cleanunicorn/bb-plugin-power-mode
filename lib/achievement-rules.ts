@@ -29,6 +29,8 @@ export const RULES = {
   landing: 5,
   mission: 3,
   longThread: 10,
+  /** Most threads kept in the saved reply map; must be at least `mission`. */
+  threadCap: 16,
   baton: 40,
   rally: 3,
   weave: 80,
@@ -381,6 +383,12 @@ export interface SavedCollection {
   revisions: number;
   replies: number;
   landings: number;
+  /**
+   * Complete replies per thread, capped at `RULES.longThread`, used only by
+   * Mission Control and The Long Thread. Key order is recency (oldest first).
+   * Holds at most `RULES.threadCap` threads and is emptied for good once both
+   * badges are unlocked; see `pruneThreads`.
+   */
   threads: Record<string, number>;
   lanterns: string[];
   jackets: string[];
@@ -389,6 +397,38 @@ export interface SavedCollection {
 }
 const dict = <T>(): Record<string, T> =>
   Object.create(null) as Record<string, T>;
+/**
+ * Bound the saved per-thread reply map. Returns `{}` once Mission Control and
+ * The Long Thread are both unlocked. Otherwise evicts the least recently used
+ * threads (oldest keys first) until at most `RULES.threadCap` remain, never
+ * evicting `current` or the most recent thread with the highest count, so Long
+ * Thread progress never goes down. Pure: returns a new dict.
+ */
+export function pruneThreads(
+  threads: Record<string, number>,
+  unlocked: Record<string, number>,
+  current?: string,
+): Record<string, number> {
+  const out = dict<number>();
+  if (
+    Object.hasOwn(unlocked, "mission-control") &&
+    Object.hasOwn(unlocked, "long-thread")
+  )
+    return out;
+  const entries = Object.entries(threads);
+  let top: string | undefined,
+    best = -Infinity;
+  for (const [k, v] of entries)
+    if (v >= best) {
+      best = v;
+      top = k;
+    }
+  let excess = entries.length - RULES.threadCap;
+  for (const [k, v] of entries)
+    if (excess > 0 && k !== top && k !== current) excess--;
+    else out[k] = v;
+  return out;
+}
 export function parseCollection(raw: unknown): SavedCollection {
   const v =
     raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
@@ -417,7 +457,7 @@ export function parseCollection(raw: unknown): SavedCollection {
     revisions: Math.floor(n(v.revisions)),
     replies: Math.floor(n(v.replies)),
     landings: Math.floor(n(v.landings)),
-    threads: numbers(v.threads, RULES.longThread),
+    threads: pruneThreads(numbers(v.threads, RULES.longThread), unlocked),
     lanterns: themes(v.lanterns),
     jackets: themes(v.jackets),
     pin:
@@ -901,10 +941,15 @@ export function reduceCollection(s: Collection, e: AchievementEvent): string[] {
       const words = e.words!;
       s.saved.replies++;
       s.session.replies[e.thread] = (s.session.replies[e.thread] ?? 0) + 1;
-      s.saved.threads[e.thread] = Math.min(
-        RULES.longThread,
-        (s.saved.threads[e.thread] ?? 0) + 1,
-      );
+      if (
+        !Object.hasOwn(s.saved.unlocked, "mission-control") ||
+        !Object.hasOwn(s.saved.unlocked, "long-thread")
+      ) {
+        // Delete and reinsert so the key order tracks recency.
+        const count = (s.saved.threads[e.thread] ?? 0) + 1;
+        delete s.saved.threads[e.thread];
+        s.saved.threads[e.thread] = Math.min(RULES.longThread, count);
+      }
       if (!s.saved.lanterns.includes(t.theme)) s.saved.lanterns.push(t.theme);
       award("hello-copilot");
       if (words >= RULES.bentoMin && words <= RULES.bentoMax)
@@ -919,6 +964,11 @@ export function reduceCollection(s: Collection, e: AchievementEvent): string[] {
       if (Object.keys(s.saved.threads).length >= RULES.mission)
         award("mission-control");
       if (s.saved.threads[e.thread] >= RULES.longThread) award("long-thread");
+      s.saved.threads = pruneThreads(
+        s.saved.threads,
+        s.saved.unlocked,
+        e.thread,
+      );
       if (t.quiet && e.quiet) award("quiet-finale");
       const p = t.handoff;
       if (p) {

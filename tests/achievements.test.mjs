@@ -7,6 +7,8 @@ import {
   parseCollection,
   progress,
   publicCard,
+  pruneThreads,
+  RULES,
 } from "../lib/achievement-rules.ts";
 const base = {
   now: 0,
@@ -475,4 +477,88 @@ test("Pocket Drummer bucket balance does not inherit speed-window gap restrictio
   [20, 20, 19].forEach((count, i) => n.input(count, { now: i * 10000 }));
   n.send("tick", { now: 30000 });
   assert.equal(n.has("pocket-drummer"), false);
+});
+
+const both = { "mission-control": 1, "long-thread": 1 };
+const ids = (n, from = 1) =>
+  Array.from({ length: n }, (_, i) => `thr_${i + from}`);
+const ones = (keys) => Object.fromEntries(keys.map((k) => [k, 1]));
+test("pruneThreads clears, caps by recency and protects the top and current threads", () => {
+  assert.equal(RULES.threadCap, 16);
+  assert.ok(RULES.threadCap >= RULES.mission);
+  const full = ones(ids(17));
+  const frozen = JSON.stringify(full);
+  assert.deepEqual({ ...pruneThreads(full, both) }, {});
+  assert.deepEqual(Object.keys(pruneThreads(full, {})), ids(16, 2));
+  assert.equal(JSON.stringify(full), frozen, "input is not mutated");
+  const atCap = ones(ids(16));
+  assert.deepEqual(Object.keys(pruneThreads(atCap, {})), ids(16));
+  assert.deepEqual(
+    Object.keys(pruneThreads({ ...full, thr_1: 5 }, {})),
+    ["thr_1", ...ids(15, 3)],
+    "the highest count survives even when oldest",
+  );
+  assert.deepEqual(
+    Object.keys(pruneThreads({ ...full, thr_17: 2 }, {}, "thr_1")),
+    ["thr_1", ...ids(14, 3), "thr_17"],
+    "current survives even when oldest",
+  );
+  assert.deepEqual(
+    Object.keys(pruneThreads({ ...full, thr_1: 4, thr_2: 4 }, {})),
+    ["thr_2", ...ids(15, 3)],
+    "ties protect the most recent top entry",
+  );
+  // Only one badge unlocked: no clearing, just the cap.
+  assert.equal(
+    Object.keys(pruneThreads(full, { "mission-control": 1 })).length,
+    16,
+  );
+});
+test("saved thread map stays capped while locked and empties once both badges unlock", () => {
+  const h = harness();
+  assert.equal(progress("mission-control", h.state).value, 0);
+  assert.equal(progress("long-thread", h.state).value, 0);
+  h.reply(20, { thread: "thr_a" });
+  h.reply(20, { thread: "thr_a" });
+  assert.equal(progress("mission-control", h.state).value, 1);
+  assert.equal(progress("long-thread", h.state).value, 2);
+  h.reply(20, { thread: "thr_b" });
+  assert.equal(progress("mission-control", h.state).value, 2);
+  assert.equal(progress("mission-control", h.state).target, 3);
+  for (let i = 1; i <= 20; i++) h.reply(20, { thread: `thr_${i}` });
+  assert.ok(h.has("mission-control"));
+  assert.equal(h.has("long-thread"), false);
+  // thr_a holds the highest count, so it survives as the oldest key.
+  assert.deepEqual(Object.keys(h.state.saved.threads), [
+    "thr_a",
+    ...ids(15, 6),
+  ]);
+  assert.equal(progress("long-thread", h.state).value, 2);
+  for (let i = 0; i < 9; i++) {
+    h.reply(20, { thread: "thr_x" });
+    h.reply(20, { thread: "thr_y" });
+    assert.ok(Object.keys(h.state.saved.threads).length <= RULES.threadCap);
+    assert.equal(progress("long-thread", h.state).value, Math.max(2, i + 1));
+  }
+  assert.equal(h.has("long-thread"), false);
+  h.reply(20, { thread: "thr_y" });
+  assert.ok(h.has("long-thread"));
+  assert.deepEqual({ ...h.state.saved.threads }, {});
+  for (let i = 0; i < 5; i++) h.reply(20, { thread: `thr_new${i}` });
+  assert.deepEqual({ ...h.state.saved.threads }, {});
+});
+test("a leftover thread map empties on the next reply once both badges are unlocked", () => {
+  const h = harness({ unlocked: both });
+  h.state.saved.threads = ones(ids(5));
+  h.reply(20, { thread: "thr_z" });
+  assert.deepEqual({ ...h.state.saved.threads }, {});
+});
+test("parseCollection prunes stored thread maps without losing unlocks", () => {
+  const unlocked = { "mission-control": 111, "long-thread": 222, "hello-copilot": 333 };
+  const done = parseCollection({ unlocked, threads: ones(ids(40)) });
+  assert.deepEqual({ ...done.unlocked }, unlocked);
+  assert.deepEqual({ ...done.threads }, {});
+  const legacy = parseCollection({ threads: { ...ones(ids(40)), thr_3: 9 } });
+  assert.deepEqual(Object.keys(legacy.threads), ["thr_3", ...ids(15, 26)]);
+  assert.equal(legacy.threads.thr_3, 9);
 });
