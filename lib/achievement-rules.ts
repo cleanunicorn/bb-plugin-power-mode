@@ -571,8 +571,34 @@ export function publicCard(a: Badge, unlocked: Record<string, number>) {
         at: unlocked[a.id],
       };
 }
+/**
+ * Award Here Be Dragons once five other hidden badges are unlocked. Counts hidden
+ * catalog badges in `s.saved.unlocked` plus `extraHidden`: unlocked hidden ids
+ * from outside the catalog (Doomsday Device), which only `power-stats` knows.
+ * Mutates `s` and returns the newly earned ids, like `reduceCollection`.
+ */
+export function checkDragons(
+  s: Collection,
+  wall: number,
+  extraHidden: readonly string[] = [],
+): string[] {
+  if (Object.hasOwn(s.saved.unlocked, "here-dragons")) return [];
+  const hidden = new Set(extraHidden);
+  for (const a of CATALOG)
+    if (a.hidden && Object.hasOwn(s.saved.unlocked, a.id)) hidden.add(a.id);
+  hidden.delete("here-dragons");
+  if (hidden.size < RULES.dragons) return [];
+  s.saved.unlocked["here-dragons"] = wall;
+  s.session.discoveries.push("here-dragons");
+  return ["here-dragons"];
+}
 // Mutates only its explicit argument, returns exactly the newly earned IDs.
-export function reduceCollection(s: Collection, e: AchievementEvent): string[] {
+// `extraHidden` lists unlocked hidden badges outside the catalog (see checkDragons).
+export function reduceCollection(
+  s: Collection,
+  e: AchievementEvent,
+  extraHidden: readonly string[] = [],
+): string[] {
   if (!Number.isFinite(e.now) || !Number.isFinite(e.wall) || e.seq <= s.lastSeq)
     return [];
   s.lastSeq = e.seq;
@@ -949,12 +975,7 @@ export function reduceCollection(s: Collection, e: AchievementEvent): string[] {
       }
     }
   }
-  if (
-    CATALOG.filter(
-      (a) => a.hidden && a.id !== "here-dragons" && s.saved.unlocked[a.id],
-    ).length >= RULES.dragons
-  )
-    award("here-dragons");
+  earned.push(...checkDragons(s, e.wall, extraHidden));
   return earned;
 }
 export function progress(
