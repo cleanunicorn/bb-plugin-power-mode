@@ -164,6 +164,8 @@ export interface OrdnanceDebug {
   pullDistance: number | null;
   /** Live particles per kind. */
   kinds: Record<string, number>;
+  /** Texts of the live flying letters, oldest first. */
+  glyphs: string[];
 }
 let debugHook: (() => OrdnanceDebug) | null = null;
 /** Test seam: live ordnance counters of the mounted engine. */
@@ -1969,8 +1971,10 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
     let sum = 0;
     let n = 0;
     const kinds: Record<string, number> = {};
+    const glyphs: string[] = [];
     for (const p of particles) {
       kinds[p.kind] = (kinds[p.kind] ?? 0) + 1;
+      if (p.kind === "glyph" && p.text) glyphs.push(p.text);
       if (p.kind === "ordnance") ordnance++;
       else if (pull && pullable(p.kind)) {
         sum += Math.hypot(p.x - pull.x, p.y - pull.y);
@@ -1982,6 +1986,7 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
       event: eventActive, lastArmed: armedThisPaste, lastTier, dimmed: dim !== null,
       pullDistance: pull && n ? sum / n : null,
       kinds,
+      glyphs,
     };
   };
 
@@ -2033,10 +2038,16 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
     }
   }
 
-  function wpm(now: number): number {
-    while (keyLog.length && now - keyLog[0].t > WPM_WINDOW_MS) keyLog.shift();
+  /** Characters in the WPM window; a best WPM needs at least 15. */
+  function windowChars(): number {
     let chars = 0;
     for (const k of keyLog) chars += k.n;
+    return chars;
+  }
+
+  function wpm(now: number): number {
+    while (keyLog.length && now - keyLog[0].t > WPM_WINDOW_MS) keyLog.shift();
+    const chars = windowChars();
     if (chars < 10 || keyLog.length < 2) return 0;
     const span = Math.max(now - keyLog[0].t, 3000);
     return Math.round(chars / 5 / (span / 60000));
@@ -2213,12 +2224,16 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
   document.addEventListener("beforeinput", rememberEditor, { capture: true, signal });
   const initialEditor = editableTarget(document.activeElement);
   if (initialEditor) editorTexts.set(initialEditor, editorText(initialEditor));
-  function insertedLength(before: string, after: string): number {
+  /** The span of `after` that replaced part of `before` (common prefix and suffix trimmed). */
+  function insertedSpan(before: string, after: string): string {
     let start = 0;
     while (start < before.length && start < after.length && before[start] === after[start]) start++;
     let oldEnd = before.length, newEnd = after.length;
     while (oldEnd > start && newEnd > start && before[oldEnd - 1] === after[newEnd - 1]) { oldEnd--; newEnd--; }
-    return newEnd - start;
+    return after.slice(start, newEnd);
+  }
+  function insertedLength(before: string, after: string): number {
+    return insertedSpan(before, after).length;
   }
   function matchingPaste(target: HTMLElement): PendingPaste | null {
     const slot = pendingPaste;
@@ -2273,15 +2288,97 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
       : selectionCaret(target);
   }
 
+  // IME composition: every update's `data` is the whole composition so far, so
+  // updates only drive the effects and the committed text counts once at
+  // `compositionend`. Browsers order the commit differently: Chrome sends its
+  // last update before `compositionend`, Firefox sends a trailing
+  // `insertCompositionText` after it, and Safari sends `deleteCompositionText`
+  // and `insertFromComposition` before it.
+  interface Composition { target: HTMLElement; base: string; last: string }
+  let composing: Composition | null = null;
+  const COMPOSITION_INPUTS = new Set(["insertCompositionText", "deleteCompositionText", "insertFromComposition"]);
+
+  interface PendingCommit { target: HTMLElement; base: string; epoch: number }
+  let pendingCommit: PendingCommit | null = null;
+
+  /**
+   * Count a finished composition. It waits for the commit's own input events
+   * (Firefox sends one after `compositionend`), but the next composition or a
+   * plain character can follow in the same task, so those resolve it first,
+   * with `after` set to the text before they changed it.
+   */
+  function flushCommit(after?: string) {
+    const p = pendingCommit;
+    pendingCommit = null;
+    if (!p || disposed || !settings.enabled || p.epoch !== ordnanceEpoch || !p.target.isConnected) return;
+    const n = insertedLength(p.base, after ?? editorText(p.target));
+    if (n > 0) commitComposition(n);
+  }
+
+  function onCompositionStart(event: Event) {
+    flushCommit(); // the DOM still holds the previous commit only
+    const target = editableTarget(event.composedPath()[0] ?? event.target);
+    composing = target ? { target, base: editorText(target), last: "" } : null;
+  }
+
+  function onCompositionEnd(event: Event) {
+    const c = composing;
+    composing = null;
+    const target = editableTarget(event.composedPath()[0] ?? event.target);
+    if (!c || c.target !== target) return;
+    const slot: PendingCommit = { target: c.target, base: c.base, epoch: ordnanceEpoch };
+    pendingCommit = slot;
+    later(() => { if (pendingCommit === slot) flushCommit(); }, 0);
+  }
+  document.addEventListener("compositionstart", onCompositionStart, { capture: true, signal });
+  document.addEventListener("compositionend", onCompositionEnd, { capture: true, signal });
+
+  /** Count committed IME text once: characters typed and burst WPM, with no second effect. */
+  function commitComposition(n: number) {
+    const now = performance.now();
+    keyLog.push({ t: now, n });
+    const speed = wpm(now);
+    if (combo > 0) wpmText = setText(hudWpm, speed > 0 ? `${speed} WPM` : "", wpmText);
+    recordStats((s) => ({
+      ...s,
+      chars: s.chars + n,
+      bestWpm: windowChars() >= 15 ? Math.max(s.bestWpm, speed) : s.bestWpm,
+    }), { typed: true });
+  }
+
+  /** A composition update: effects and a combo bump, flying letters for the new suffix only, no counts. */
+  function onCompositionInput(target: HTMLElement, inputEvent: InputEvent, inputType: string, text: string) {
+    const c = composing;
+    // Firefox's trailing commit input arrives with no composition active, and
+    // Safari's delete/insert pair re-sends the finished text: neither is a keystroke.
+    if (!c || c.target !== target || inputType !== "insertCompositionText") return;
+    const current = inputEvent.data ?? insertedSpan(c.base, text);
+    if (current === c.last) return;
+    let start = 0;
+    while (start < c.last.length && start < current.length && c.last[start] === current[start]) start++;
+    const added = current.slice(start);
+    c.last = current;
+    attach();
+    const caret = caretOf(target);
+    if (!caret) return;
+    react(target, caret, { deleting: false, newline: false, pasted: false, data: added || null, chars: 0 });
+  }
+
   function onInput(event: Event) {
     const target = editableTarget(event.composedPath()[0] ?? event.target);
     if (!target) return;
     const previous = editorTexts.get(target);
     const text = editorText(target);
     editorTexts.set(target, text);
+    if (composing && composing.target !== target) composing = null;
     if (!settings.enabled) return;
     const inputEvent = event as InputEvent;
     const inputType = inputEvent.inputType ?? "insertText";
+    if (inputEvent.isComposing || composing || COMPOSITION_INPUTS.has(inputType)) {
+      onCompositionInput(target, inputEvent, inputType, text);
+      return;
+    }
+    if (pendingCommit) flushCommit(pendingCommit.target === target ? previous : undefined);
     if (inputType.startsWith("history")) return;
     const deleting = inputType.startsWith("delete");
     const newline = inputType === "insertParagraph" || inputType === "insertLineBreak" || inputEvent.data === "\n";
@@ -2399,7 +2496,7 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
       pastes: s.pastes + (pasted ? 1 : 0),
       clutches: s.clutches + (clutch ? 1 : 0),
       bestCombo: Math.max(s.bestCombo, earned),
-      bestWpm: typed > 0 && keyLog.length >= 15 ? Math.max(s.bestWpm, speed) : s.bestWpm,
+      bestWpm: typed > 0 && windowChars() >= 15 ? Math.max(s.bestWpm, speed) : s.bestWpm,
     }), { typed: typed > 0 });
     start();
   }
@@ -3599,6 +3696,8 @@ export function mountPowerEngine(signal: AbortSignal): () => void {
     modeObserver.disconnect();
     if (modeCheck) cancelAnimationFrame(modeCheck);
     agentHooks = null;
+    composing = null;
+    pendingCommit = null;
     setUnlockHandler(null);
     unsubscribeChallenge();
     unresetUnlock();
