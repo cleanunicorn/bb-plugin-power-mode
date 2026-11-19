@@ -1,6 +1,8 @@
 // One-command browser regression run: build the fixture site, serve it on
 // 127.0.0.1:9146 (the port the fixtures hard-code), run every tests/*.browser.js
 // through BetterWright, and always stop the server afterwards (browser runs use --no-daemon --close).
+// Optional arguments filter fixtures by name: `npm run test:browser -- paste-ordnance`
+// runs only the fixtures whose filename contains any of the given strings.
 import { spawn, spawnSync } from 'node:child_process';
 import { createReadStream, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
@@ -16,12 +18,19 @@ const PROFILE = 'power-mode-tests';
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript' };
 const bin = join(root, 'node_modules', '.bin', process.platform === 'win32' ? 'betterwright.cmd' : 'betterwright');
 
+// BetterWright's `run` CLI stops a snippet after a fixed 30 s. Flag fixtures that
+// take more than two thirds of that so they are split before they turn flaky.
+const SLOW_SECONDS = 22;
+
 const fail = message => { console.error(`\n[test:browser] ${message}`); process.exit(1); };
 
 if (!existsSync(bin)) fail('betterwright is not installed. Run `npm ci` first.');
 
-const fixtures = readdirSync(join(root, 'tests')).filter(f => f.endsWith('.browser.js')).sort();
-if (!fixtures.length) fail('No tests/*.browser.js fixtures found.');
+const filters = process.argv.slice(2);
+const all = readdirSync(join(root, 'tests')).filter(f => f.endsWith('.browser.js')).sort();
+if (!all.length) fail('No tests/*.browser.js fixtures found.');
+const fixtures = filters.length ? all.filter(f => filters.some(filter => f.includes(filter))) : all;
+if (!fixtures.length) fail(`No tests/*.browser.js fixture matches ${filters.map(f => `"${f}"`).join(', ')}.`);
 
 const build = spawnSync(process.execPath, [join(root, 'scripts', 'build-test-site.mjs')], { stdio: 'inherit' });
 if (build.status !== 0) fail('Building the test site failed.');
@@ -82,8 +91,9 @@ const results = [];
 try {
   for (const file of fixtures) {
     console.log(`\n[test:browser] ${file}`);
+    const started = Date.now();
     const result = await runFixture(file);
-    results.push({ file, ...result });
+    results.push({ file, seconds: (Date.now() - started) / 1000, ...result });
     if (result.setup) {
       console.error('\n[test:browser] BetterWright browser is not set up. Run `npx betterwright setup` and retry.');
       break;
@@ -94,6 +104,10 @@ try {
 }
 
 console.log('\n[test:browser] summary');
-for (const r of results) console.log(`  ${r.ok ? 'PASS' : 'FAIL'}  ${r.file}${r.ok ? '' : ` (${r.reason})`}`);
+const width = Math.max(...results.map(r => r.file.length));
+for (const r of results) {
+  const slow = r.seconds > SLOW_SECONDS ? `  SLOW (over ${SLOW_SECONDS} s of the 30 s limit)` : '';
+  console.log(`  ${r.ok ? 'PASS' : 'FAIL'}  ${r.file.padEnd(width)}  ${r.seconds.toFixed(1).padStart(5)} s${slow}${r.ok ? '' : `  (${r.reason})`}`);
+}
 const failed = results.filter(r => !r.ok).length + (fixtures.length - results.length);
 process.exit(failed ? 1 : 0);

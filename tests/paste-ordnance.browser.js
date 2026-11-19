@@ -1,4 +1,6 @@
 /* note: Paste ordnance (#8): tiers, caps, skins, paste capture and safety. */
+// The theme × tier sweep lives in paste-ordnance-themes-{a,b}.browser.js: BetterWright's
+// `run` stops a snippet after 30 s and the full sweep alone takes about 16 s.
 // Run against tests/power-engine.html served on port 9146 (see tests/README.md).
 await page.addInitScript(() => {
   let now = 10000, sequence = 0;
@@ -201,36 +203,6 @@ const result = await page.evaluate(async () => {
   assert(slams.filter(s => s === 'ON FIRE!').length === 1, `ON FIRE! must slam once (${slams.join(', ')})`);
   settle();
 
-  // ---- every theme × tier: its own slam title, pixels, clean canvases after
-  const chars = [10, 100, 400, 1000, 3000, 10000, 30000, 100000, 300000];
-  let combos = 0;
-  for (const theme of ['neon', 'fire', 'matrix', 'sakura', 'cyberpunk', 'retro']) {
-    T.updatePowerSettings({ theme });
-    settle();
-    for (let tier = 1; tier <= 9; tier++) {
-      slams.length = 0;
-      const prev = combo();
-      paste(field, chars[tier - 1], { text: 'q'.repeat(chars[tier - 1]) });
-      assert(debug().lastTier === tier, `${theme} tier ${tier} picked ${debug().lastTier}`);
-      assert(debug().lastArmed <= 16, `${theme} tier ${tier} armed ${debug().lastArmed} timers (cap 16)`);
-      const milestone = T.milestoneCrossed(prev, combo());
-      let drew = false;
-      for (let i = 0; i < 200 && (debug().pending > 0 || !drew); i++) {
-        advance();
-        if (!drew && i % 10 === 5) drew = pixels().some(n => n > 0);
-        assert(debug().particles <= debug().maxParticles, 'Particles stay within maxParticles()');
-      }
-      assert(drew, `${theme} tier ${tier} must draw`);
-      const expected = T.ORDNANCE_SKINS[theme].titles[tier - 1];
-      assert(slams.some(s => s && s === expected) || (milestone && tier <= 2),
-        `${theme} tier ${tier} must slam "${expected}" (got ${slams.join(' | ')})`);
-      settle();
-      assert(pixels().every(n => n === 0), `${theme} tier ${tier}: canvases must clear after idling`);
-      assert(!debug().dimmed && !debug().event, 'Events release the dim and the lock');
-      combos++;
-    }
-  }
-
   // ---- theme switch mid-flight keeps the captured skin
   T.updatePowerSettings({ theme: 'neon' });
   settle();
@@ -317,7 +289,7 @@ const result = await page.evaluate(async () => {
   assert(debug().lastTier === 8, 'The event lock was released by disable');
   settle();
 
-  return { pickTable: true, staggered: frames, combos, singularities, maxPending, pasteMs10x300k: pasteMs };
+  return { pickTable: true, staggered: frames, singularities, maxPending, pasteMs10x300k: pasteMs };
 });
 await screenshot({ kind: 'proof' });
 return result;

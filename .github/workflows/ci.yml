@@ -37,7 +37,8 @@ jobs:
   browser:
     name: Browser regression fixtures
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Setup may take up to 15 minutes when every download attempt fails.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -48,9 +49,50 @@ jobs:
       # The betterwright CLI's shebang is `env bun`; the runner has no bun.
       - uses: oven-sh/setup-bun@v2
       # BetterWright downloads its managed Chromium; no account, profile or
-      # external service is needed. The runner's kernel policy blocks Chromium's
-      # setuid sandbox, so the sandbox is disabled for this throwaway job.
-      - run: npx betterwright setup
+      # external service is needed. The pinned Chromium release is a constant
+      # inside the betterwright package, so its locked version keys the cache.
+      - name: Read BetterWright version
+        id: betterwright
+        run: echo "version=$(node -p "require('./package-lock.json').packages['node_modules/betterwright'].version")" >> "$GITHUB_OUTPUT"
+      # Only the managed Chromium (with its install receipt) is cached, not the
+      # profiles, sessions or logs elsewhere in ~/.betterwright.
+      - name: Restore BetterWright Chromium
+        id: chromium-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.betterwright/chromium
+          key: betterwright-chromium-${{ runner.os }}-${{ runner.arch }}-${{ steps.betterwright.outputs.version }}
+      # Always run setup: on a cache hit whose receipt matches it logs
+      # "BetterChromium already installed" and downloads nothing; on a mismatch
+      # it downloads again. The release download sometimes fails (504) or
+      # stalls, so each attempt is bounded and retried with a growing pause.
+      # Downloads are staged and swapped in, so a failed attempt leaves no
+      # partial install behind.
+      - name: Set up BetterWright Chromium
+        timeout-minutes: 15
+        run: |
+          attempts=4
+          for attempt in $(seq 1 "$attempts"); do
+            echo "betterwright setup: attempt $attempt of $attempts"
+            if timeout 180 npx betterwright setup; then exit 0; fi
+            if [ "$attempt" -lt "$attempts" ]; then
+              pause=$((attempt * 15))
+              echo "betterwright setup failed; retrying in ${pause}s"
+              sleep "$pause"
+            fi
+          done
+          echo "::error::betterwright setup failed; giving up after $attempts attempts"
+          exit 1
+      # Save right after a successful setup on a miss, so the cache is kept even
+      # if a fixture fails later. A failed setup never reaches this step.
+      - name: Save BetterWright Chromium
+        if: steps.chromium-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.betterwright/chromium
+          key: ${{ steps.chromium-cache.outputs.cache-primary-key }}
+      # The runner's kernel policy blocks Chromium's setuid sandbox, so the
+      # sandbox is disabled for this throwaway job.
       - run: npm run test:browser
         env:
           BETTERWRIGHT_CHROMIUM_ARGS: --no-sandbox
